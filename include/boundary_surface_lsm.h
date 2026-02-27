@@ -154,6 +154,10 @@ class Boundary_surface_lsm : public Boundary<TF>
         bool sw_tile_stats;
         bool sw_tile_stats_col;
         bool sw_homogenize_sfc;
+        bool sw_nudge_theta;
+
+        TF nudge_theta_coeff;            // = 1 / timescale (s-1)
+        std::vector<TF> theta_nudge;     // target soil moisture profile (m3 m-3)
 
         TF emis_sfc;
 
@@ -272,6 +276,7 @@ class Boundary_surface_lsm : public Boundary<TF>
         TF* conductivity_h_g; // Half level (unit m s-1)
         TF* source_g;         // Source term (unit s-1)
         TF* root_fraction_g;  // Root fraction per soil layer (-)
+        TF* theta_nudge_g;    // target soil moisture profile (m3 m-3)
 
         // Lookup table data obtained from input NetCDF file:
         TF* theta_res_g;  // Residual soil moisture content (m3 m-3)

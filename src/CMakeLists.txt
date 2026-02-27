@@ -27,9 +27,9 @@ target_include_directories(microhhc PRIVATE "../include" "../rte-rrtmgp-cpp/incl
 
 if(USECUDA)
     if(USEKERNELLAUNCHER)
-        target_link_libraries(microhhc PRIVATE CUDA::curand CUDA::cufft ${LIBS} kernel_launcher)
+        target_link_libraries(microhhc PRIVATE ${LIBS} kernel_launcher)
     else()
-        target_link_libraries(microhhc PRIVATE CUDA::curand CUDA::cufft ${LIBS})
+        target_link_libraries(microhhc PRIVATE ${LIBS})
     endif()
 else()
     target_link_libraries(microhhc PRIVATE ${LIBS})

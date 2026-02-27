@@ -401,5 +401,27 @@ namespace Soil_kernels_g
             }
         }
     }
+
+    template<typename TF> __global__
+    void nudge_theta_g(
+            TF* const __restrict__ tend,
+            const TF* const __restrict__ fld,
+            const TF* const __restrict__ theta_nudge,
+            const TF nudge_coeff,
+            const int istart, const int iend,
+            const int jstart, const int jend,
+            const int kstart, const int kend,
+            const int icells, const int ijcells)
+    {
+        const int i = blockIdx.x*blockDim.x + threadIdx.x + istart;
+        const int j = blockIdx.y*blockDim.y + threadIdx.y + jstart;
+        const int k = blockIdx.z + kstart;
+
+        if (i < iend && j < jend && k < kend)
+        {
+            const int ijk = i + j*icells + k*ijcells;
+            tend[ijk] -= nudge_coeff * (fld[ijk] - theta_nudge[k-kstart]);
+        }
+    }
 }
 #endif

@@ -551,5 +551,26 @@ namespace Soil_kernels
                         tend[ijk] += source[ijk];
                 }
     }
+
+    template<typename TF>
+    void nudge_theta(
+            TF* const restrict tend,
+            const TF* const restrict fld,
+            const TF* const restrict theta_nudge,
+            const TF nudge_coeff,
+            const int istart, const int iend,
+            const int jstart, const int jend,
+            const int kstart, const int kend,
+            const int icells, const int ijcells)
+    {
+        for (int k=kstart; k<kend; ++k)
+            for (int j=jstart; j<jend; ++j)
+                #pragma ivdep
+                for (int i=istart; i<iend; ++i)
+                {
+                    const int ijk = i + j*icells + k*ijcells;
+                    tend[ijk] -= nudge_coeff * (fld[ijk] - theta_nudge[k-kstart]);
+                }
+    }
 }
 #endif

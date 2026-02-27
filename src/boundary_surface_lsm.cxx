@@ -268,6 +268,12 @@ Boundary_surface_lsm<TF>::Boundary_surface_lsm(
     sw_homogenize_sfc = inputin.get_item<bool>("land_surface", "swhomogenizesfc", "", false);
     sw_tile_stats     = inputin.get_item<bool>("land_surface", "swtilestats", "", false);
     sw_tile_stats_col = inputin.get_item<bool>("land_surface", "swtilestats_column", "", false);
+    sw_nudge_theta    = inputin.get_item<bool>("land_surface", "swnudge_theta", "", false);
+    if (sw_nudge_theta)
+    {
+        const TF tau = inputin.get_item<TF>("land_surface", "nudge_theta_timescale", "");
+        nudge_theta_coeff = TF(1) / tau;
+    }
 
     // BvS: for now, read surface emission from radiation group. This needs
     // to be coupled correctly, also for 2D varying emissivities.
@@ -917,6 +923,17 @@ void Boundary_surface_lsm<TF>::exec(
             sgd.kstart, sgd.kend,
             gd.icells, gd.ijcells);
 
+    if (sw_nudge_theta)
+        sk::nudge_theta(
+                fields.sts.at("theta")->fld.data(),
+                fields.sps.at("theta")->fld.data(),
+                theta_nudge.data(),
+                nudge_theta_coeff,
+                gd.istart, gd.iend,
+                gd.jstart, gd.jend,
+                sgd.kstart, sgd.kend,
+                gd.icells, gd.ijcells);
+
     fields.release_tmp(tmp1);
 
     fields.release_tmp_xy(dutot);
@@ -1205,6 +1222,13 @@ void Boundary_surface_lsm<TF>::create(
                 agd.jstart, agd.jend,
                 sgd.kstart, sgd.kend,
                 agd.icells, agd.ijcells);
+
+        // Soil moisture nudging target profile
+        if (sw_nudge_theta)
+        {
+            theta_nudge.resize(sgd.ktot);
+            soil_group.get_variable(theta_nudge, "theta_nudge", {0}, {sgd.ktot});
+        }
 
         // Lambda function to read namelist value, and init 2D field homogeneous.
         auto init_homogeneous = [&](std::vector<TF>& field, std::string name)

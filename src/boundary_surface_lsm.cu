@@ -723,6 +723,21 @@ void Boundary_surface_lsm<TF>::exec(
             gd.jstart, gd.jend,
             sgd.kstart, sgd.kend,
             gd.icells, gd.ijcells);
+    cuda_check_error();
+
+    if (sw_nudge_theta)
+    {
+        sk::nudge_theta_g<<<grid_gpu_3d, block_gpu_3d>>>(
+                fields.sts.at("theta")->fld_g,
+                fields.sps.at("theta")->fld_g,
+                theta_nudge_g,
+                nudge_theta_coeff,
+                gd.istart, gd.iend,
+                gd.jstart, gd.jend,
+                sgd.kstart, sgd.kend,
+                gd.icells, gd.ijcells);
+        cuda_check_error();
+    }
 
     fields.release_tmp_g(tmp1);
 }
@@ -952,6 +967,9 @@ void Boundary_surface_lsm<TF>::prepare_device(Thermo<TF>& thermo)
     cuda_safe_call(cudaMalloc(&source_g, tf_memsize_ijk));
     cuda_safe_call(cudaMalloc(&root_fraction_g, tf_memsize_ijk));
 
+    if (sw_nudge_theta)
+        cuda_safe_call(cudaMalloc(&theta_nudge_g, sgd.ktot*sizeof(TF)));
+
     // 4. Init lookup table with van Genuchten parameters:
     const int memsize_vg_lut = theta_res.size() * sizeof(TF);
 
@@ -1043,6 +1061,9 @@ void Boundary_surface_lsm<TF>::forward_device(Thermo<TF>& thermo)
     cuda_safe_call(cudaMemcpy(conductivity_h_g, conductivity_h.data(), tf_memsize_ijk, cudaMemcpyHostToDevice));
     cuda_safe_call(cudaMemcpy(source_g, source.data(), tf_memsize_ijk, cudaMemcpyHostToDevice));
     cuda_safe_call(cudaMemcpy(root_fraction_g, root_fraction.data(), tf_memsize_ijk, cudaMemcpyHostToDevice));
+
+    if (sw_nudge_theta)
+        cuda_safe_call(cudaMemcpy(theta_nudge_g, theta_nudge.data(), sgd.ktot*sizeof(TF), cudaMemcpyHostToDevice));
 
     // 4. Copy lookup table with van Genuchten parameters:
     const int memsize_vg_lut = theta_res.size() * sizeof(TF);
@@ -1137,6 +1158,9 @@ void Boundary_surface_lsm<TF>::clear_device(Thermo<TF>& thermo)
     cuda_safe_call(cudaFree(conductivity_h_g));
     cuda_safe_call(cudaFree(source_g));
     cuda_safe_call(cudaFree(root_fraction_g));
+
+    if (sw_nudge_theta)
+        cuda_safe_call(cudaFree(theta_nudge_g));
 
     cuda_safe_call(cudaFree(theta_res_g));
     cuda_safe_call(cudaFree(theta_wp_g));
