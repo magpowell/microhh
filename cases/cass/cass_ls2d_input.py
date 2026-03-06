@@ -80,8 +80,7 @@ grid.plot()
 # -----------------------------------------------------------------------
 composite_days = read_composite_days()  # all years 1997-2009
 
-n_days    = 0
-n_pending = 0
+n_days         = 0
 soil_theta_sum = None
 soil_t_sum     = None
 soil_type      = None
@@ -96,16 +95,15 @@ for dt in composite_days:
     settings['end_date']   = datetime(year=dt.year, month=dt.month, day=dt.day, hour=23)
 
     # Download required ERA5 files (cached by LS2D; skips existing files).
-    # LS2D raises SystemExit when a CDS request is submitted but not yet ready.
-    # Exit here too — submitting many requests at once can cause CDS rejections.
-    # Re-run this script once the pending request completes.
+    # LS2D raises SystemExit when a CDS request is submitted but not yet ready,
+    # or when an existing request is still queued/running.
+    # Exit immediately with code 1 so the outer loop (screen session) retries
+    # after a sleep — this keeps exactly 1 day (3 requests) in flight at a time.
     try:
         ls2d.download_era5(settings)
     except SystemExit:
-        n_pending += 1
-        print(f'\nERA5 request submitted for {dt.strftime("%Y-%m-%d")} ({n_days} days processed so far).')
-        print('Re-run this script once the CDS request completes.')
-        import sys; sys.exit(0)
+        print(f'  CDS request pending for {dt.strftime("%Y-%m-%d")} ({n_days} days processed). Re-run once complete.')
+        sys.exit(1)
     except Exception as e:
         print(f'  Warning: download failed for {dt.strftime("%Y-%m-%d")}: {e}')
         continue
