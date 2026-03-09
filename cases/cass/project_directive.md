@@ -3,9 +3,10 @@
 ## Goal
 Understand when 3D vs. 1D radiative transfer produces the largest differences in cloud LWP.
 Use the CASS composite case (ARM SGP, July 24, multi-year composite) as the baseline.
-Run paired 2stream (1D) and raytracer (3D) simulations across two experiment sweeps:
-1. `cs_veg` — skin heat capacity (J&M replication)
-2. `soil_moisture` — soil moisture nudging to a fixed profile
+Run paired 2stream (1D) and raytracer (3D) simulations across three experiment sweeps:
+1. `no_aerosols` — aerosols off, standard winds (isolates aerosol direct effect vs. base)
+2. `cs_veg` — skin heat capacity (J&M replication)
+3. `soil_moisture` — soil moisture nudging to a fixed profile
 
 ---
 
@@ -17,15 +18,23 @@ cases/cass/
     setup_base.py          # sets up $SCRATCH/CASS_LES/base/{2stream,raytracer}/rep_{01..04}
     sbatch_base.sh         # 4-per-node sbatch for base runs
     submit_base.sh         # submits base jobs
+    submit_debug_base.sh
   experiments/
+    no_aerosols/
+      setup_no_aerosols.py   # sets up all no_aerosols scratch dirs
+      sbatch_no_aerosols.sh  # 4-per-node sbatch
+      submit_no_aerosols.sh  # submits all jobs
+      submit_debug_no_aerosols.sh
     cs_veg/
-      setup_cs_veg.py      # sets up all cs_veg scratch dirs
-      sbatch_cs_veg.sh     # 4-per-node sbatch
-      submit_cs_veg.sh     # submits all jobs
+      setup_cs_veg.py        # sets up all cs_veg scratch dirs
+      sbatch_cs_veg.sh       # 4-per-node sbatch
+      submit_cs_veg.sh       # submits all jobs
+      submit_debug_cs_veg.sh
     soil_moisture/
       setup_soil_moisture.py
       sbatch_soil_moisture.sh
       submit_soil_moisture.sh
+      submit_debug_soil_moisture.sh
   shared/
     preprocessing/         # run-once ERA5/CAMS pipeline (never symlinked into run dirs)
       cass_ls2d_input.py
@@ -63,6 +72,9 @@ $SCRATCH/CASS_LES/
     2stream/rep_01/ ... rep_04/
     raytracer/rep_01/ ... rep_04/
   experiments/
+    no_aerosols/
+      2stream/rep_01/ ... rep_04/
+      raytracer/rep_01/ ... rep_04/
     cs_veg/
       cs_veg_{VALUE}/      # VALUE = 0, 42000, 420000, 4200000, 42000000
         2stream/rep_01/ ... rep_04/
@@ -103,6 +115,22 @@ $SCRATCH/CASS_LES/
 - Aerosols: **ON** (`swaerosol=true`)
 - `c_veg=1.0`, `cs_veg=0` (no skin heat capacity)
 - No soil moisture nudging
+
+---
+
+## Experiment: no_aerosols
+
+**Science**: Isolate the aerosol direct radiative effect on cloud LWP by comparing with the base case.
+
+**Configuration** (on top of base):
+- `[aerosol] swaerosol = false`
+- Standard winds (same as base — no `--zero-winds`)
+- No soil moisture nudging
+- `cs_veg = 0` (same as base)
+
+**Run structure**: 4 reps × 2 RT = 8 runs total (same as base)
+
+**input.nc changes**: none — `cass_input.py` called with no flags
 
 ---
 
@@ -216,8 +244,10 @@ The nudge feature (branch `mpowell-local`) must be validated before science runs
 | `shared/preprocessing/download_cams.py` | CAMS aerosol download |
 | `shared/data/van_genuchten_parameters.nc` | LSM soil type lookup table |
 | `base/setup_base.py` | Sets up base scratch dirs |
+| `experiments/no_aerosols/setup_no_aerosols.py` | Sets up no_aerosols scratch dirs |
 | `experiments/cs_veg/setup_cs_veg.py` | Sets up cs_veg scratch dirs |
 | `experiments/soil_moisture/setup_soil_moisture.py` | Sets up soil_moisture scratch dirs |
+| `shared/sbatch_debug.sh` | Single-GPU debug sbatch (30 min, debug QOS) |
 | MicroHH source: `src/boundary_surface_lsm.cxx` | Soil moisture nudging (CPU) |
 | MicroHH source: `src/boundary_surface_lsm.cu` | Soil moisture nudging (GPU) |
 | MicroHH source: `include/soil_kernels.h` | `nudge_theta()` CPU kernel |
@@ -229,45 +259,33 @@ The nudge feature (branch `mpowell-local`) must be validated before science runs
 ### Done
 - [x] CASS baseline runs exist at `$SCRATCH/CASS_LES_2stream` and `$SCRATCH/CASS_LES_raytracer`
 - [x] Soil moisture nudging feature implemented (branch `mpowell-local`), compiled, not validated
-- [x] Project structure designed (this document)
-
-### In Progress
-- [ ] ERA5 composite preprocessing (`cass_ls2d_input.py`): **100/119 days cached**
-  - Cache location: `/pscratch/sd/m/mpowell/LS2D_ERA5/` (absolute path — unaffected by restructuring)
-  - Script is idempotent: re-running skips already-cached days
-  - Resume command (from `cases/cass/`):
-    ```bash
-    while true; do
-        python cass_ls2d_input.py
-        [[ $? -eq 0 ]] && echo "All days complete!" && break
-        echo "$(date): pending — sleeping 20 min..."
-        sleep 1200
-    done
-    ```
-  - **Three files must stay in `cases/cass/` root until this job finishes** (do not move them):
-    - `cass_ls2d_input.py` — sbatch runs it from CWD
-    - `cass_utils.py` — imported as module from CWD by the above
-    - `shcu_sgp_summer_97to09.nc` — absolute path hardcoded in `cass_utils.py`
-  - All other restructuring can proceed now
-  - After job completes: move these three files to their final places and update the hardcoded path in `cass_utils.py`
+- [x] Project structure designed and implemented (`base/`, `experiments/`, `shared/`, `analysis/`)
+- [x] `shared/data/` populated: `cass_snd.txt`, `cass_sfc.txt`, `cass_lsf.txt`, `van_genuchten_parameters.nc`
+- [x] `c_veg=1.0` set in `shared/config/cass_2stream.ini` and `shared/config/cass_raytracer.ini`
+- [x] `shared/cass_input.py` updated with `--zero-winds` and `--theta-nudge FLOAT` flags
+- [x] `base/setup_base.py`, `base/sbatch_base.sh`, `base/submit_base.sh`, `base/submit_debug_base.sh` written
+- [x] `experiments/no_aerosols/` — all scripts written (setup, sbatch, submit, submit_debug)
+- [x] `experiments/cs_veg/setup_cs_veg.py`, `sbatch_cs_veg.sh`, `submit_cs_veg.sh`, `submit_debug_cs_veg.sh` written
+- [x] `experiments/soil_moisture/setup_soil_moisture.py`, `sbatch_soil_moisture.sh`, `submit_soil_moisture.sh`, `submit_debug_soil_moisture.sh` written
+- [x] `shared/sbatch_debug.sh` written (single-GPU, debug QOS, 30 min)
+- [x] `shared/data/README.md` written
+- [x] ERA5 composite preprocessing complete: 119 composite days (1997–2009), cached in `/pscratch/sd/m/mpowell/LS2D_ERA5/cass/`
+- [x] `cass_ls2d_input.nc` written to `/pscratch/sd/m/mpowell/CASS_LES/shared_data/` and symlinked into `shared/data/`
+- [x] `cass_ls2d_input.py`, `cass_utils.py`, `shcu_sgp_summer_97to09.nc` moved to `shared/preprocessing/`; hardcoded path in `cass_utils.py` updated
 
 ### Next Steps (in order)
-1. **Finish ERA5 preprocessing** (19 days remaining — resume with loop above)
-2. **Restructure `cases/cass/`** into `base/`, `experiments/`, `shared/`, `analysis/` layout
-2. **Update `cass_input.py`** to accept `--theta-nudge FLOAT` and `--zero-winds` flags
-3. **Update base ini files**: set `c_veg=1.0` everywhere
-4. **Write `base/setup_base.py`** and `base/submit_base.sh`
-5. **Write `experiments/cs_veg/setup_cs_veg.py`** and sbatch/submit scripts
-6. **Write `experiments/soil_moisture/setup_soil_moisture.py`** and sbatch/submit scripts
-7. **Validate soil moisture nudging** (debug run, short timescale, verify convergence)
-8. **Run base case** (4 × 2stream + 4 × raytracer)
-9. **Run cs_veg sweep** (5 values × 4 reps × 2 RT = 40 runs)
-10. **Run soil_moisture sweep** (4 values × 4 reps × 2 RT = 32 runs)
+1. **Validate soil moisture nudging** (debug run, short timescale, verify theta_soil converges)
+2. **Run base case** (4 × 2stream + 4 × raytracer) via `base/submit_base.sh`
+3. **Run no_aerosols** (4 × 2stream + 4 × raytracer = 8 runs) via `experiments/no_aerosols/submit_no_aerosols.sh`
+4. **Run cs_veg sweep** (5 values × 8 runs = 40 runs) via `experiments/cs_veg/submit_cs_veg.sh`
+5. **Run soil_moisture sweep** (4 values × 8 runs = 32 runs) via `experiments/soil_moisture/submit_soil_moisture.sh`
 
 ### Notes / Gotchas
 - Always re-run setup scripts after reorganizing — stale symlinks will silently break runs
-- `cass_input.py` reads `cass.ini` from CWD — must be called from within the run dir
+- `cass_input.py` reads `cass.ini` from CWD — must be called from within the run dir (setup scripts handle this)
 - Raytracer runs need `--constraint=gpu&hbm80g`; 2stream only needs `--constraint=gpu`
 - `nudge_theta_timescale` units: seconds (86400 = 1 day relaxation)
 - cs_veg `0` is a valid value (no skin heat capacity buffer)
 - `rndseed` in `[fields]` must differ across reps: use 1, 2, 3, 4
+- `surface_an_agg.nc` (present in cass root and old run dirs) — not referenced by any script, safe to ignore
+- `shared/data/cass_ls2d_input.nc` must exist before running any setup script

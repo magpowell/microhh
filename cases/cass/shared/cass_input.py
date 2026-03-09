@@ -10,14 +10,21 @@ Day: July 24 (DOY 205)
 import sys
 sys.path.insert(0, '/global/homes/m/mpowell/repos/LS2D')
 
+import argparse
 import numpy as np
 import netCDF4 as nc
 import xarray as xr
-import os
 from datetime import datetime
 import ls2d as ls2d_pkg
 
 from cass_utils import read_composite_days
+
+parser = argparse.ArgumentParser(description='Generate cass_input.nc for MicroHH')
+parser.add_argument('--zero-winds', action='store_true',
+                    help='Set u=v=0 in init and u_nudge=v_nudge=0 in timedep')
+parser.add_argument('--theta-nudge', type=float, default=None,
+                    help='Add uniform theta_nudge[4] to soil group (e.g. 0.3)')
+args = parser.parse_args()
 
 float_type = "f8"
 
@@ -277,8 +284,8 @@ nc_group_init = nc_file.createGroup("init")
 add_nc_var('z', ("z",), nc_group_init, z)
 add_nc_var("thl", ("z",), nc_group_init, thl)
 add_nc_var("qt", ("z",), nc_group_init, qt)
-add_nc_var("u", ("z",), nc_group_init, u)
-add_nc_var("v", ("z",), nc_group_init, v)
+add_nc_var("u", ("z",), nc_group_init, np.zeros(kmax) if args.zero_winds else u)
+add_nc_var("v", ("z",), nc_group_init, np.zeros(kmax) if args.zero_winds else v)
 add_nc_var("nudgefac", ("z",), nc_group_init, np.ones(kmax)/10800)
 
 # Aerosol initial profiles: composite-mean on LES z grid
@@ -301,8 +308,8 @@ add_nc_var("time_ls", ("time_ls",), nc_group_timedep, time_ls)
 add_nc_var("thl_ls", ("time_ls", "z"), nc_group_timedep, thlls)
 add_nc_var("qt_ls", ("time_ls", "z"), nc_group_timedep, qtls)
 add_nc_var("w_ls", ("time_ls", "z"), nc_group_timedep, wls)
-add_nc_var("u_nudge", ("time_ls", "z"), nc_group_timedep, uls)
-add_nc_var("v_nudge", ("time_ls", "z"), nc_group_timedep, vls)
+add_nc_var("u_nudge", ("time_ls", "z"), nc_group_timedep, np.zeros_like(uls) if args.zero_winds else uls)
+add_nc_var("v_nudge", ("time_ls", "z"), nc_group_timedep, np.zeros_like(vls) if args.zero_winds else vls)
 
 
 # Radiation variables on LES grid.
@@ -361,6 +368,9 @@ add_nc_var('theta_soil', ('z'), nc_soil, ls2d_soil.theta_soil.values)
 add_nc_var('t_soil', ('z'), nc_soil, ls2d_soil.t_soil.values)
 add_nc_var('index_soil', ('z'), nc_soil, ls2d_soil.index_soil.values)
 add_nc_var('root_frac', ('z'), nc_soil, ls2d_soil.root_frac.values)
+
+if args.theta_nudge is not None:
+    add_nc_var('theta_nudge', ('z'), nc_soil, np.full(ls2d_soil.sizes['z'], args.theta_nudge))
 
 nc_file.close()
 
