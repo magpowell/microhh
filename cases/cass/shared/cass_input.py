@@ -17,6 +17,9 @@ parser.add_argument('--zero-winds', action='store_true',
                     help='Set u=v=0 in init and u_nudge=v_nudge=0 in timedep')
 parser.add_argument('--theta-nudge', type=float, default=None,
                     help='Add uniform theta_nudge[4] to soil group (e.g. 0.3)')
+parser.add_argument('--nudge-thermo', nargs=2, metavar=('PATH', 'TIMESCALE'),
+                    help='Add thl/qt nudge profiles from nudge_profiles.nc at PATH '
+                         'and set nudgefac = 1/TIMESCALE (s) uniformly in init group')
 args = parser.parse_args()
 
 float_type = "f8"
@@ -209,7 +212,8 @@ add_nc_var("thl", ("z",), nc_group_init, thl)
 add_nc_var("qt", ("z",), nc_group_init, qt)
 add_nc_var("u", ("z",), nc_group_init, np.zeros(kmax) if args.zero_winds else u)
 add_nc_var("v", ("z",), nc_group_init, np.zeros(kmax) if args.zero_winds else v)
-add_nc_var("nudgefac", ("z",), nc_group_init, np.ones(kmax)/10800)
+nudge_timescale = float(args.nudge_thermo[1]) if args.nudge_thermo else 10800.
+add_nc_var("nudgefac", ("z",), nc_group_init, np.ones(kmax) / nudge_timescale)
 
 # Aerosol initial profiles: composite-mean on LES z grid
 for name in aerosol_names:
@@ -233,6 +237,25 @@ add_nc_var("qt_ls", ("time_ls", "z"), nc_group_timedep, qtls)
 add_nc_var("w_ls", ("time_ls", "z"), nc_group_timedep, wls)
 add_nc_var("u_nudge", ("time_ls", "z"), nc_group_timedep, np.zeros_like(uls) if args.zero_winds else uls)
 add_nc_var("v_nudge", ("time_ls", "z"), nc_group_timedep, np.zeros_like(vls) if args.zero_winds else vls)
+
+# Thermodynamic nudge profiles (mean_state_nudge experiment)
+if args.nudge_thermo:
+    import netCDF4 as _nc2
+    nudge_path = args.nudge_thermo[0]
+    print(f"Reading thermodynamic nudge profiles from {nudge_path}...")
+    with _nc2.Dataset(nudge_path) as nf:
+        thl_nudge_data = nf.variables["thl_nudge"][:].data.copy()
+        qt_nudge_data  = nf.variables["qt_nudge"][:].data.copy()
+        t_nudge        = nf.variables["time_ls"][:].data.copy()
+    # Verify time coordinate matches
+    if not np.allclose(t_nudge, time_ls, atol=1.0):
+        raise ValueError(
+            f"nudge_profiles.nc time_ls does not match cass_input.nc time_ls.\n"
+            f"  nudge: {t_nudge}\n  input: {time_ls}"
+        )
+    add_nc_var("thl_nudge", ("time_ls", "z"), nc_group_timedep, thl_nudge_data)
+    add_nc_var("qt_nudge",  ("time_ls", "z"), nc_group_timedep, qt_nudge_data)
+    print(f"   thl_nudge and qt_nudge written (timescale={nudge_timescale:.0f} s)")
 
 
 # Radiation variables on LES grid.
@@ -305,3 +328,5 @@ print(f"   Initial profiles at z = {z[0]:.1f} to {z[-1]:.1f} m")
 print(f"   Surface fluxes from t = {time_surface[0]:.0f} to {time_surface[-1]:.0f} s")
 print(f"   Large-scale forcings from t = {time_ls[0]:.0f} to {time_ls[-1]:.0f} s")
 print(f"   Aerosols: composite mean over {n_cams} CAMS days (2003-2009)")
+print(f"   nudgefac = 1/{nudge_timescale:.0f} s"
+      + (" [thermo nudge ON]" if args.nudge_thermo else " [u,v only]"))

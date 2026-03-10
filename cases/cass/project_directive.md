@@ -3,10 +3,12 @@
 ## Goal
 Understand when 3D vs. 1D radiative transfer produces the largest differences in cloud LWP.
 Use the CASS composite case (ARM SGP, July 24, multi-year composite) as the baseline.
-Run paired 2stream (1D) and raytracer (3D) simulations across three experiment sweeps:
+Run paired 2stream (1D) and raytracer (3D) simulations across five experiment sweeps:
 1. `no_aerosols` — aerosols off, standard winds (isolates aerosol direct effect vs. base)
-2. `cs_veg` — skin heat capacity (J&M replication)
-3. `soil_moisture` — soil moisture nudging to a fixed profile
+2. `no_aerosols_zero_wind` — aerosols off, zero winds (zero-wind control; also provides nudge profiles for mean_state_nudge)
+3. `cs_veg` — skin heat capacity (J&M replication)
+4. `soil_moisture` — soil moisture nudging to a fixed profile
+5. `mean_state_nudge` — aggressive thl/qt nudging of raytracer toward no_aerosols_zero_wind 2stream mean state, isolating the direct 3D RT effect from the mean-state-divergence pathway
 
 ---
 
@@ -35,6 +37,17 @@ cases/cass/
       sbatch_soil_moisture.sh
       submit_soil_moisture.sh
       submit_debug_soil_moisture.sh
+    no_aerosols_zero_wind/
+      setup_no_aerosols_zero_wind.py
+      sbatch_no_aerosols_zero_wind.sh
+      submit_no_aerosols_zero_wind.sh
+      submit_debug_no_aerosols_zero_wind.sh
+    mean_state_nudge/
+      extract_nudge_profiles.py  # averages no_aerosols_zero_wind 2stream column stats → timedep nudge profiles
+      setup_mean_state_nudge.py
+      sbatch_mean_state_nudge.sh
+      submit_mean_state_nudge.sh
+      submit_debug_mean_state_nudge.sh
   shared/
     preprocessing/         # run-once ERA5/CAMS pipeline (never symlinked into run dirs)
       cass_ls2d_input.py
@@ -85,6 +98,13 @@ $SCRATCH/CASS_LES/
       theta_{VALUE}/       # VALUE = 0.1, 0.2, 0.3, 0.4
         2stream/rep_01/ ... rep_04/
         raytracer/rep_01/ ... rep_04/
+    no_aerosols_zero_wind/
+      2stream/rep_01/ ... rep_04/
+      raytracer/rep_01/ ... rep_04/
+    mean_state_nudge/
+      nudge_{TIMESCALE}s/  # e.g. nudge_3600s, nudge_1800s, nudge_900s
+        raytracer/rep_01/ ... rep_04/
+        # NOTE: no 2stream subdir — control is no_aerosols_zero_wind/2stream
 ```
 
 - Each rep directory is self-contained: symlinks to shared data + resources, its own `cass.ini` and `cass_input.nc`.
@@ -193,6 +213,76 @@ still unverified.
 
 ---
 
+## Experiment: no_aerosols_zero_wind
+
+**Science**: Zero-wind control case alongside no_aerosols. Eliminates mean wind and wind shear
+so that surface-cloud coupling is the dominant signal. Also serves as the source of nudge
+profiles for the mean_state_nudge experiment.
+
+**Configuration** (on top of base):
+- `[aerosol] swaerosol = false`
+- Zero winds (`--zero-winds` flag to `cass_input.py`)
+- No soil moisture nudging, `cs_veg = 0`
+
+**Run structure**: 4 reps × 2 RT = 8 runs (same as no_aerosols)
+
+**Dual purpose**:
+1. Direct science result: zero-wind 2stream vs. raytracer LWP differences
+2. Provides nudge profiles for mean_state_nudge (extract from 2stream column output)
+
+---
+
+## Experiment: mean_state_nudge
+
+**Science**: In Tijhuis et al. 2024, 3D and 1D simulations diverge in mean qt even with a 3h
+nudging timescale. This experiment asks: if the raytracer is forced onto the same instantaneous
+mean thermodynamic state as the 2stream, do LWP differences persist? A "yes" implicates the
+direct radiative effect of 3D geometry on the cloud; a "no" implicates the mean-state-divergence
+pathway.
+
+**Design**:
+1. The no_aerosols_zero_wind 2stream reps (rep_01–04) run freely.
+2. Domain-mean `thl(z, t)` and `qt(z, t)` are extracted from their column output and
+   averaged across all 4 reps → ensemble-mean 1D profiles, noise-suppressed.
+3. Those profiles become the timedep nudge target for the raytracer runs, which are nudged
+   aggressively toward the 2stream mean state.
+
+**Sequential dependency**: no_aerosols_zero_wind 2stream must complete before raytracer setup.
+The comparison is: no_aerosols_zero_wind 2stream (free) vs. mean_state_nudge raytracer (constrained).
+Both use identical boundary conditions (no aerosols, zero winds); only the RT scheme and nudge differ.
+
+**INI overlays** (raytracer only, on top of no_aerosols base):
+- `[force] nudgelist = u,v,thl,qt`
+- `[force] timedeplist_nudge = u,v,thl,qt`
+- nudgefac set via input.nc (see below)
+
+**Key code constraint**: `nudgefac` (1/s) is a single height-varying profile in the `init` group
+of input.nc, shared across all nudged variables. No per-variable timescale. The current baseline
+is uniform at 1/10800 s⁻¹ (3h). The minimum stable aggressive timescale must be found
+experimentally — the code has no tendency limiter (Bart van Stratum, pers. comm.).
+
+**input.nc changes**: A new `--nudge-thermo PATH TIMESCALE` option in `cass_input.py`. When provided:
+- Reads ensemble-mean thl/qt profiles from the specified stats file (output of `extract_nudge_profiles.py`)
+- Writes `thl_nudge[time, z]` and `qt_nudge[time, z]` into the `timedep` group
+- Overwrites `nudgefac` in the `init` group with `1/TIMESCALE` (uniform, in s⁻¹)
+
+**Post-processing script** (`extract_nudge_profiles.py`):
+- Reads column output from all 4 no_aerosols_zero_wind 2stream reps
+- Averages `thl[t, z]` and `qt[t, z]` across reps
+- Writes output in the timedep-compatible format expected by `cass_input.py`
+- Output: `$SCRATCH/CASS_LES/experiments/mean_state_nudge/nudge_profiles.nc`
+
+**Aerosols**: off (`swaerosol = false`) — same as no_aerosols
+
+**Wind condition**: zero winds (same as other experiments)
+
+**Run structure**: raytracer only, 4 reps per timescale value. Start with a single debug run at
+3600s to verify stability before trying shorter timescales.
+
+**Status**: all scripts written and ready. See `README.md` for step-by-step workflow.
+
+---
+
 ## Zero Wind Condition (applies to all experiments, NOT the base case)
 
 **Goal**: eliminate mean wind and wind shear so that surface-cloud coupling is the dominant
@@ -255,10 +345,13 @@ To be discussed with advisor before science runs begin.
 | `experiments/no_aerosols/setup_no_aerosols.py` | Sets up no_aerosols scratch dirs |
 | `experiments/cs_veg/setup_cs_veg.py` | Sets up cs_veg scratch dirs |
 | `experiments/soil_moisture/setup_soil_moisture.py` | Sets up soil_moisture scratch dirs |
+| `experiments/mean_state_nudge/extract_nudge_profiles.py` | Post-processes no_aerosols 2stream stats → timedep nudge profiles |
+| `experiments/mean_state_nudge/setup_mean_state_nudge.py` | Sets up mean_state_nudge scratch dirs (raytracer only) |
 | `shared/sbatch_debug.sh` | Single-GPU debug sbatch (30 min, debug QOS) |
 | MicroHH source: `src/boundary_surface_lsm.cxx` | Soil moisture nudging (CPU) |
 | MicroHH source: `src/boundary_surface_lsm.cu` | Soil moisture nudging (GPU) |
 | MicroHH source: `include/soil_kernels.h` | `nudge_theta()` CPU kernel |
+| MicroHH source: `src/force.cxx:468` | `timedep_dim = "time_ls"` — all timedep nudge profiles share this time dimension |
 
 ---
 
@@ -275,6 +368,8 @@ To be discussed with advisor before science runs begin.
 - [x] `experiments/no_aerosols/` — all scripts written (setup, sbatch, submit, submit_debug)
 - [x] `experiments/cs_veg/setup_cs_veg.py`, `sbatch_cs_veg.sh`, `submit_cs_veg.sh`, `submit_debug_cs_veg.sh` written
 - [x] `experiments/soil_moisture/setup_soil_moisture.py`, `sbatch_soil_moisture.sh`, `submit_soil_moisture.sh`, `submit_debug_soil_moisture.sh` written
+- [x] `experiments/mean_state_nudge/` — all scripts written: `extract_nudge_profiles.py`, `setup_mean_state_nudge.py`, `sbatch_mean_state_nudge.sh`, `submit_mean_state_nudge.sh`, `submit_debug_mean_state_nudge.sh`
+- [x] `shared/cass_input.py` updated with `--nudge-thermo PATH TIMESCALE` flag
 - [x] `shared/sbatch_debug.sh` written (single-GPU, debug QOS, 30 min)
 - [x] `shared/data/README.md` written
 - [x] ERA5 composite preprocessing complete: 119 composite days (1997–2009), cached in `/pscratch/sd/m/mpowell/LS2D_ERA5/cass/`
@@ -282,6 +377,8 @@ To be discussed with advisor before science runs begin.
 - [x] `cass_ls2d_input.py`, `cass_utils.py`, `shcu_sgp_summer_97to09.nc` moved to `shared/preprocessing/`; hardcoded path in `cass_utils.py` updated
 - [x] `compute_cams_composite.py` written and run: 60 composite days (2003–2009), output at `$SCRATCH/CASS_LES/shared_data/cass_cams_composite.nc`, symlinked into `shared/data/`
 - [x] `cass_input.py` refactored to read `cass_cams_composite.nc` — fast, no CAMS API calls at run time
+- [x] NaN crash (previously at t=4620s with `swaerosol=true`) fixed in MicroHH source
+- [x] **All debug runs successful** — base, no_aerosols, cs_veg_42000, soil_moisture/theta_0p1, soil_moisture/theta_0p4 (both 2stream and raytracer); runs timed out at debug wall limit, not crashed
 
 ### Next Steps (in order)
 1. **Resolve LSM spin-up question** (discuss with advisor before science runs)
@@ -289,10 +386,12 @@ To be discussed with advisor before science runs begin.
 3. **Run no_aerosols** (4 × 2stream + 4 × raytracer = 8 runs) via `experiments/no_aerosols/submit_no_aerosols.sh`
 4. **Run cs_veg sweep** (5 values × 8 runs = 40 runs) via `experiments/cs_veg/submit_cs_veg.sh`
 5. **Run soil_moisture sweep** (4 values × 8 runs = 32 runs) via `experiments/soil_moisture/submit_soil_moisture.sh`
+6. **Run no_aerosols_zero_wind** (4 × 2stream + 4 × raytracer = 8 runs) via `experiments/no_aerosols_zero_wind/submit_no_aerosols_zero_wind.sh`
+7. **mean_state_nudge**: extract nudge profiles from no_aerosols_zero_wind 2stream output, run debug raytracer at 3600s to verify stability, then find minimum stable timescale
 
 ### Observations
 - Raytracer runs show a **larger SEB residual** than 2stream runs — cause unknown; flag when analysing results
-- **Base debug runs crash at t=4620s** with `EXCEPTION: Simulation has non-finite numbers` — confirmed caused by aerosols (`swaerosol=true`); no_aerosols debug run (swaerosol=false, same winds) passes t=4620 cleanly. Root cause unknown — check `cass_cams_composite.nc` for bad AOD values, or try `swdeltaaer=1`.
+- NaN crash at t=4620s with aerosols **resolved** — fixed in MicroHH source code; all debug runs now pass that point cleanly
 
 ### Notes / Gotchas
 - Always re-run setup scripts after reorganizing — stale symlinks will silently break runs
