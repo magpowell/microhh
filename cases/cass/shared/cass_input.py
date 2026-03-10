@@ -7,17 +7,10 @@ Location: 36.5N, 97.5W (ARM SGP central facility)
 Day: July 24 (DOY 205)
 """
 
-import sys
-sys.path.insert(0, '/global/homes/m/mpowell/repos/LS2D')
-
 import argparse
 import numpy as np
 import netCDF4 as nc
 import xarray as xr
-from datetime import datetime
-import ls2d as ls2d_pkg
-
-from cass_utils import read_composite_days
 
 parser = argparse.ArgumentParser(description='Generate cass_input.nc for MicroHH')
 parser.add_argument('--zero-winds', action='store_true',
@@ -176,97 +169,27 @@ for t, block in enumerate(time_blocks):
 
 
 # -----------------------------------------------------------------------
-# Read CAMS aerosol data: composite-mean over 2003-2009 composite days.
-# Aerosols and gases are averaged over all hours (10-23 UTC) and all days.
-# CAMS EAC4 is available from 2003 onwards; earlier years are excluded.
+# Read pre-computed CAMS aerosol composite (from compute_cams_composite.py).
+# Profiles are on CAMS native model levels; interpolated to LES z below.
 # -----------------------------------------------------------------------
-print("Reading CAMS aerosol data (composite 2003-2009)...")
-
-cams_vars = {
-    'eac4_ml': [
-        'dust_aerosol_0.03-0.55um_mixing_ratio',
-        'dust_aerosol_0.55-0.9um_mixing_ratio',
-        'dust_aerosol_0.9-20um_mixing_ratio',
-        'hydrophilic_black_carbon_aerosol_mixing_ratio',
-        'hydrophilic_organic_matter_aerosol_mixing_ratio',
-        'hydrophobic_black_carbon_aerosol_mixing_ratio',
-        'hydrophobic_organic_matter_aerosol_mixing_ratio',
-        'sea_salt_aerosol_0.03-0.5um_mixing_ratio',
-        'sea_salt_aerosol_0.5-5um_mixing_ratio',
-        'sea_salt_aerosol_5-20um_mixing_ratio',
-        'sulphate_aerosol_mixing_ratio',
-        'specific_humidity',
-        'temperature'],
-    'eac4_sfc': ['surface_pressure'],
-}
-
-base_cams_settings = {
-    'central_lat' : 36.5,
-    'central_lon' : -97.5,
-    'area_size'   : 2,
-    'case_name'   : 'cass',
-    'cams_path'   : '/pscratch/sd/m/mpowell/LS2D_CAMS',
-    'cdsapirc'    : '/global/homes/m/mpowell/.cdsapirc',
-    'write_log'   : False,
-    'data_source' : 'CDS',
-    'ntasks'      : 1,
-}
+print("Reading CAMS aerosol composite (cass_cams_composite.nc)...")
 
 aerosol_names = [f'aermr{i:02d}' for i in range(1, 12)]
 
-# Composite days with available CAMS data (2003-2009)
-cams_days = read_composite_days(year_min=2003, year_max=2009)
+cams_composite = xr.open_dataset('cass_cams_composite.nc')
+z_lay_cams = cams_composite['z_lay'].values
+aer_lay_sum = {name: cams_composite[name].values for name in aerosol_names}
+n_cams = int(cams_composite.attrs.get('n_composite_days', -1))
 
-n_cams = 0
-aer_les_sum  = {}   # time-and-day mean on LES z grid: {name: array(z)}
-aer_lay_sum  = {}   # time-and-day mean on CAMS model levels: {name: array(lay)}
-z_lay_cams_sum = None
-
-for dt in cams_days:
-    cams_settings = dict(base_cams_settings)
-    cams_settings['start_date'] = datetime(year=dt.year, month=dt.month, day=dt.day, hour=10)
-    cams_settings['end_date']   = datetime(year=dt.year, month=dt.month, day=dt.day, hour=23)
-
-    try:
-        cams = ls2d_pkg.Read_cams(cams_settings, variables=cams_vars)
-        cams_les = cams.get_les_input(z)
-
-        # Clip aerosol mixing ratios to non-negative values
-        for name in aerosol_names:
-            cams_les[name]           = np.maximum(cams_les[name], 0.)
-            cams_les[f'{name}_lay']  = np.maximum(cams_les[f'{name}_lay'], 0.)
-
-        # Time-mean for this day (axis 0 = time)
-        zlay_day = cams_les.z_lay.mean(axis=0).values
-
-        if n_cams == 0:
-            z_lay_cams_sum = zlay_day.copy()
-            for name in aerosol_names:
-                aer_les_sum[name]          = cams_les[name].mean(axis=0).values.copy()
-                aer_lay_sum[f'{name}_lay'] = cams_les[f'{name}_lay'].mean(axis=0).values.copy()
-        else:
-            z_lay_cams_sum += zlay_day
-            for name in aerosol_names:
-                aer_les_sum[name]          += cams_les[name].mean(axis=0).values
-                aer_lay_sum[f'{name}_lay'] += cams_les[f'{name}_lay'].mean(axis=0).values
-
-        n_cams += 1
-        print(f'  CAMS: {dt.strftime("%Y-%m-%d")} ({n_cams}/{len(cams_days)})')
-
-    except Exception as e:
-        print(f'  Warning: CAMS read failed for {dt.strftime("%Y-%m-%d")}: {e}')
-        continue
-
-if n_cams == 0:
-    raise RuntimeError('No CAMS composite days were successfully read.')
-
-print(f'Averaged CAMS aerosols over {n_cams} days')
-
-# Composite means
-z_lay_cams = z_lay_cams_sum / n_cams
+# Interpolate composite aerosol profiles from CAMS levels to LES z grid
+sort_idx = np.argsort(z_lay_cams)
+z_lay_cams_sorted = z_lay_cams[sort_idx]
+aer_les_sum = {}
 for name in aerosol_names:
-    aer_les_sum[name]          /= n_cams
-    aer_lay_sum[f'{name}_lay'] /= n_cams
+    arr_sorted = aer_lay_sum[name][sort_idx]
+    aer_les_sum[name] = np.maximum(np.interp(z, z_lay_cams_sorted, arr_sorted), 0.)
+
+print(f'Loaded CAMS composite ({n_cams} days)')
 
 
 # -----------------------------------------------------------------------
@@ -351,10 +274,8 @@ add_nc_var('o2', (), nc_rad, ls2d_radiation.o2.values)
 
 # Aerosols on radiation levels: interpolate composite-mean CAMS profiles to ERA5 z_lay
 z_lay_era5 = ls2d_radiation.z_lay.values
-sort_idx = np.argsort(z_lay_cams)
-z_lay_cams_sorted = z_lay_cams[sort_idx]
 for name in aerosol_names:
-    aer_cams_sorted = aer_lay_sum[f'{name}_lay'][sort_idx]
+    aer_cams_sorted = aer_lay_sum[name][sort_idx]
     aer_era5 = np.interp(z_lay_era5, z_lay_cams_sorted, aer_cams_sorted)
     add_nc_var(name, ('lay',), nc_rad, np.maximum(aer_era5, 0.))
 
@@ -364,7 +285,12 @@ ls2d_soil = xr.open_dataset('cass_ls2d_input.nc', group = 'soil')
 nc_soil = nc_file.createGroup('soil')
 add_nc_dim('z', ls2d_soil.sizes['z'], nc_soil)
 add_nc_var('z', ('z'), nc_soil, ls2d_soil.z.values)
-add_nc_var('theta_soil', ('z'), nc_soil, ls2d_soil.theta_soil.values)
+theta_soil_init = (
+    np.full(ls2d_soil.sizes['z'], args.theta_nudge)
+    if args.theta_nudge is not None
+    else ls2d_soil.theta_soil.values
+)
+add_nc_var('theta_soil', ('z'), nc_soil, theta_soil_init)
 add_nc_var('t_soil', ('z'), nc_soil, ls2d_soil.t_soil.values)
 add_nc_var('index_soil', ('z'), nc_soil, ls2d_soil.index_soil.values)
 add_nc_var('root_frac', ('z'), nc_soil, ls2d_soil.root_frac.values)
