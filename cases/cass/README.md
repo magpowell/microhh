@@ -58,7 +58,7 @@ bash experiments/soil_moisture/submit_soil_moisture.sh
 bash experiments/mean_state_nudge/submit_mean_state_nudge.sh --timescale 3600
 ```
 
-### 3. Single debug run (debug QOS, ~2–5 min for 64×64 grid)
+### 3. Single debug run (debug QOS, ~15-30 min for 64×64 grid)
 
 ```bash
 # Most experiments: setup + submit in one step
