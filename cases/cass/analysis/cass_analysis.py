@@ -46,12 +46,8 @@ except ImportError:
 
 # ── Physical constants ────────────────────────────────────────────────────────
 Lv  = 2.5e6    # J kg⁻¹  latent heat of vaporisation
-Ls  = 2.834e6  # J kg⁻¹  latent heat of sublimation
 cp  = 1005.0   # J kg⁻¹ K⁻¹
-g   = 9.81     # m s⁻²
 rho = 1.2      # kg m⁻³  reference surface air density
-
-FILL_VALUE = -1.0e9   # MicroHH output fill value
 
 # ── Style maps (keep consistent across all notebooks) ────────────────────────
 RT_STYLE = {
@@ -240,16 +236,6 @@ def load_stats_ensemble(rep_dirs: list) -> tuple[dict, dict]:
 # XY loading  (xarray + dask for lazy evaluation)
 # ══════════════════════════════════════════════════════════════════════════════
 
-_XY_VARS_DEFAULT = [
-    "qlqi_path", "qlqi_base", "qlqi_top", "ql",
-    "thl_fluxbot", "qt_fluxbot",
-    "sw_flux_dn", "sw_flux_dn_dir",
-    "lw_flux_dn", "lw_flux_up",
-    "sw_flux_sfc_dir_rt", "sw_flux_sfc_dif_rt",   # raytracer only
-    "b", "thl", "w",
-]
-
-
 def load_xy_files(run_dir, variables=None, chunks=None) -> xr.Dataset:
     """Load xy cross-section netCDF files from *run_dir*.
 
@@ -284,7 +270,7 @@ def load_xy_files(run_dir, variables=None, chunks=None) -> xr.Dataset:
         for dim in ("z", "zh"):
             if dim in ds_v.dims and ds_v.sizes[dim] == 1:
                 ds_v = ds_v.squeeze(dim, drop=True)
-        ds_v = ds_v.where(ds_v != FILL_VALUE)
+        ds_v = ds_v.where(ds_v != -1.0e9)
         datasets.append(ds_v)
 
     if not datasets:
@@ -368,9 +354,6 @@ def conditioned_means_ensemble(rep_dirs: list, variables=None) -> tuple[dict, di
 # ══════════════════════════════════════════════════════════════════════════════
 # 3D dump loading  (requires 3d_to_nc.py to have been run first)
 # ══════════════════════════════════════════════════════════════════════════════
-
-_3D_VARS_DEFAULT = ["thl", "qt", "ql", "w", "b"]
-
 
 def load_3d_nc(run_dir, variables=None, chunks=None) -> xr.Dataset:
     """Load 3D netCDF dump files produced by ``python/3d_to_nc.py``.
@@ -527,151 +510,6 @@ def find_cloud_objects(mask_2d: np.ndarray, dx: float, dy: float,
     # Sort by size descending
     props.sort(key=lambda p: p["area_m2"], reverse=True)
     return labeled, props
-
-
-def extract_root_slice(ds_3d_t: xr.Dataset, cy: int, cx: int,
-                       orientation: str = "y") -> xr.Dataset:
-    """Extract a vertical slice through a cloud root centroid.
-
-    Parameters
-    ----------
-    ds_3d_t : Dataset at a single time  (dims: z or zh, y, x)
-    cy, cx : centroid grid indices
-    orientation : 'y' → xz-slice at y=cy; 'x' → yz-slice at x=cx
-
-    Returns
-    -------
-    xr.Dataset with dims (z, x) or (z, y)
-    """
-    if orientation == "y":
-        return ds_3d_t.isel(y=cy)
-    return ds_3d_t.isel(x=cx)
-
-
-def nondim_slice(sl: xr.Dataset, cloud_mask_1d: np.ndarray,
-                 horiz_coords: np.ndarray, z_sl: float) -> xr.Dataset:
-    """Non-dimensionalise a vertical slice by cloud-root width and subcloud-layer height.
-
-    Horizontal axis: x → (x − centroid) / L, where L is the cloud-root width
-    along the slice (number of LWP > 0 columns × dx).
-    Vertical axis:   z → z / z_sl.
-
-    Parameters
-    ----------
-    sl : Dataset from extract_root_slice
-    cloud_mask_1d : bool array (nx or ny) — True where LWP > 0 (cloud-root columns)
-    horiz_coords : coordinate values [m] corresponding to cloud_mask_1d
-    z_sl : subcloud-layer height [m]
-    """
-    sl = sl.copy(deep=False)
-
-    # L = width of the cloud-root region along the slice
-    cloud_indices = np.where(cloud_mask_1d)[0]
-    if len(cloud_indices) == 0:
-        raise ValueError("No cloud-root pixels in this slice")
-    L = float(len(cloud_indices)) * float(horiz_coords[1] - horiz_coords[0])
-    centroid_m = float(horiz_coords[cloud_indices].mean())
-
-    # Identify horizontal dim
-    horiz_dim = "x" if "x" in sl.dims else "y"
-    coords_m = sl[horiz_dim].values.astype(float)
-    sl = sl.assign_coords({horiz_dim: (coords_m - centroid_m) / L})
-    sl[horiz_dim].attrs["long_name"] = "x/L"
-
-    # Rescale vertical
-    for zdim in ("z", "zh"):
-        if zdim in sl.coords:
-            sl = sl.assign_coords({zdim: sl[zdim].values / z_sl})
-            sl[zdim].attrs["long_name"] = f"{zdim}/z_sl"
-
-    sl.attrs["L_m"] = L
-    sl.attrs["z_sl_m"] = z_sl
-    return sl
-
-
-def extract_cloud_root_profiles_1d(ds_3d_t: xr.Dataset,
-                                    mask_2d: np.ndarray) -> dict:
-    """Vertical profiles of turbulent fluxes conditioned on cloud-root columns (LWP > 0).
-
-    Computes instantaneous w'θ_l' and w'q_v' and averages over three partitions:
-    cloud-root columns (LWP > 0), environment columns (LWP = 0), and the full domain.
-
-    Parameters
-    ----------
-    ds_3d_t : Dataset at a single time, must contain w_prime, thl_prime, qv_prime
-              (dims: z, y, x).
-    mask_2d : (ny, nx) bool — True where LWP > 0.
-
-    Returns
-    -------
-    dict with keys ``'cloud_root'``, ``'env'``, ``'domain'``, each a dict with:
-        ``flux_thl`` (K m s⁻¹), ``flux_qv`` (g kg⁻¹ m s⁻¹), ``z`` (m).
-    """
-    for req in ("w_prime", "thl_prime", "qv_prime"):
-        if req not in ds_3d_t:
-            raise ValueError(
-                f"Dataset missing '{req}'; ensure load_3d_nc() loaded qt and ql."
-            )
-
-    flux_thl = (ds_3d_t["w_prime"] * ds_3d_t["thl_prime"]).squeeze()
-    flux_qv  = (ds_3d_t["w_prime"] * ds_3d_t["qv_prime"]).squeeze() * 1e3
-
-    zdim = "z" if "z" in flux_thl.dims else "zh"
-    z    = flux_thl[zdim].values
-
-    mask_da = xr.DataArray(mask_2d, dims=["y", "x"])
-
-    def _cmean(field, m):
-        return field.where(m).mean(["x", "y"]).values
-
-    return {
-        "cloud_root": {"flux_thl": _cmean(flux_thl,  mask_da),
-                       "flux_qv":  _cmean(flux_qv,   mask_da), "z": z},
-        "env":        {"flux_thl": _cmean(flux_thl, ~mask_da),
-                       "flux_qv":  _cmean(flux_qv,  ~mask_da), "z": z},
-        "domain":     {"flux_thl": flux_thl.mean(["x", "y"]).values,
-                       "flux_qv":  flux_qv.mean(["x", "y"]).values,  "z": z},
-    }
-
-
-def plot_cloud_root_profiles_comparison(ax_thl, ax_qt,
-                                         prof_2s: dict, prof_rt: dict,
-                                         z_sl_2s: float = None,
-                                         z_sl_rt: float = None,
-                                         condition: str = "cloud_root") -> None:
-    """Compare 1D vertical flux profiles conditioned on cloud root for both RT types.
-
-    Parameters
-    ----------
-    ax_thl, ax_qt : matplotlib Axes (left: heat flux, right: moisture flux)
-    prof_2s, prof_rt : dicts from extract_cloud_root_profiles_1d
-    z_sl_2s, z_sl_rt : subcloud-layer heights [m] for reference lines
-    condition : ``'cloud_root'``, ``'env'``, or ``'domain'``
-    """
-    _COND_LABEL = {
-        "cloud_root": "cloud-root columns (LWP > 0)",
-        "env":        "environment (LWP = 0)",
-        "domain":     "domain mean",
-    }
-    for rt, prof, z_sl in [("2stream", prof_2s, z_sl_2s),
-                            ("raytracer", prof_rt, z_sl_rt)]:
-        p   = prof[condition]
-        sty = RT_STYLE[rt]
-        ax_thl.plot(p["flux_thl"], p["z"], label=RT_LABEL[rt], **sty)
-        ax_qt.plot( p["flux_qv"],  p["z"], label=RT_LABEL[rt], **sty)
-        if z_sl is not None:
-            for ax in (ax_thl, ax_qt):
-                ax.axhline(z_sl, color=sty["color"], ls=":", lw=1,
-                           label=f"z_sl {RT_LABEL[rt]}")
-
-    for ax in (ax_thl, ax_qt):
-        ax.axvline(0, color="gray", lw=0.5)
-        ax.set_ylabel("z  (m)")
-
-    ax_thl.set_xlabel("w'θ_l'  (K m s⁻¹)")
-    ax_qt.set_xlabel("w'q_v'  (g kg⁻¹ m s⁻¹)")
-    ax_thl.set_title(f"Turbulent fluxes  —  {_COND_LABEL.get(condition, condition)}")
-    ax_thl.legend(fontsize=8)
 
 
 def compute_normalized_cloud_root_profiles(ds_3d: xr.Dataset,
@@ -929,18 +767,6 @@ def plot_seb_residual(ax, stats_mean: dict, rt_type: str = "2stream") -> plt.Axe
     return ax
 
 
-def plot_cloud_cover(ax, stats_mean: dict, rt_type: str = "2stream") -> plt.Axes:
-    """Panel: cloud fraction and LWP."""
-    t   = stats_mean["t_local"]
-    sty = RT_STYLE[rt_type]
-    ax.plot(t, stats_mean["qlqi_cover"] * 100,
-            label=f"{RT_LABEL[rt_type]} liq+ice", **sty)
-    ax.plot(t, stats_mean["ql_cover"] * 100, color=sty["color"],
-            ls=sty["ls"], alpha=0.5, label=f"{RT_LABEL[rt_type]} liquid")
-    ax.set_ylabel("Cloud fraction (%)")
-    ax.figure.autofmt_xdate()
-    return ax
-
 
 def plot_flux_conditioned(ax, t_local, shaded_mean, unshaded_mean,
                           shaded_std=None, unshaded_std=None,
@@ -1036,68 +862,148 @@ def plot_flux_profiles(ax_thl, ax_qt, stats_mean: dict,
     ax_thl.set_ylabel("z  (m)")
 
 
-def plot_cloud_root_slice(ax_thl, ax_qt, sl_nd: xr.Dataset,
-                          cloud_mask_1d: np.ndarray = None,
-                          zmax_sl: float = 1.0,
-                          vlim_thl: tuple = None,
-                          vlim_qv: tuple  = None) -> None:
-    """Panels: w'θ_l' and w'q_v' in a non-dimensionalised cloud-root slice.
+# ══════════════════════════════════════════════════════════════════════════════
+# L&P composite  —  standard grid + helpers shared by prep script and notebook
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Standard non-dimensional composite grid (Lohou & Patton 2014)
+XL_GRID  = np.linspace(-1.0, 1.0, 200)   # x/L (or y/L) axis
+ZND_GRID = np.linspace( 0.0, 1.0, 100)   # z/z_sl axis
+
+# Variables saved per event (keys used in events_xz.nc / events_yz.nc)
+COMPOSITE_VARS = ("w_thl", "w_qv", "w_prime", "ql", "thl_prime", "qt_prime")
+
+
+def chord_length_1d(labeled: np.ndarray, label: int,
+                    cy: int, cx: int,
+                    dx: float, dy: float,
+                    orientation: str) -> float:
+    """Chord length of a cloud object through the centroid row or column.
 
     Parameters
     ----------
-    sl_nd : non-dimensionalised Dataset from nondim_slice
-    cloud_mask_1d : bool array marking the cloud-root region (plotted as span)
-    zmax_sl : upper z/z_sl limit for display (default 1.0 = cloud base)
-    vlim_thl : (vmin, vmax) for w'θ_l' colorbar; if None, computed from data (95th pct)
-    vlim_qv  : (vmin, vmax) for w'q_v' colorbar; if None, computed from data (95th pct)
+    labeled : (ny, nx) int label array from find_cloud_objects
+    label : object label integer
+    cy, cx : centroid row / column indices
+    dx, dy : grid spacing in metres
+    orientation : 'y' → xz-slice (chord along x through row cy)
+                  'x' → yz-slice (chord along y through column cx)
     """
-    horiz_dim = "x" if "x" in sl_nd.dims else "y"
+    if orientation == "y":
+        return float((labeled[cy, :] == label).sum()) * dx
+    else:
+        return float((labeled[:, cx] == label).sum()) * dy
 
-    if "thl_prime" not in sl_nd or "w_prime" not in sl_nd:
-        raise ValueError("Dataset missing thl_prime or w_prime; check load_3d_nc()")
-    if "qv_prime" not in sl_nd:
-        raise ValueError("Dataset missing qv_prime; ensure qt and ql were loaded in load_3d_nc()")
 
-    flux_thl = (sl_nd["thl_prime"] * sl_nd["w_prime"]).squeeze()
-    flux_qv  = (sl_nd["qv_prime"]  * sl_nd["w_prime"]).squeeze() * 1e3
+def interp_event_to_std_grid(field_2d: np.ndarray,
+                              x_nd: np.ndarray,
+                              z_nd: np.ndarray,
+                              xl_grid: np.ndarray = XL_GRID,
+                              znd_grid: np.ndarray = ZND_GRID) -> np.ndarray:
+    """Bilinear interpolation from a non-dimensional (z/z_sl, x/L) grid
+    to the standard composite grid (ZND_GRID × XL_GRID).
 
-    zdim = "z" if "z" in flux_thl.dims else "zh"
-    h    = flux_thl[zdim].values
-    x    = flux_thl[horiz_dim].values
+    Parameters
+    ----------
+    field_2d : (nz, nhoriz) array on the original non-dim coordinates
+    x_nd     : (nhoriz,) x/L coordinates of the original grid, monotone increasing
+    z_nd     : (nz,)     z/z_sl coordinates of the original grid, monotone increasing
+    xl_grid, znd_grid : output grid arrays (default: module-level constants)
 
-    # Clip to subcloud layer for both display and color scaling
-    z_mask = h <= zmax_sl
-    flux_thl = flux_thl.isel({zdim: z_mask})
-    flux_qv  = flux_qv.isel( {zdim: z_mask})
-    h = h[z_mask]
+    Returns
+    -------
+    (n_znd, n_xL) array on the standard grid; NaN outside the original extent
+    """
+    from scipy.interpolate import RegularGridInterpolator
+    fn = RegularGridInterpolator(
+        (z_nd, x_nd), field_2d,
+        method="linear", bounds_error=False, fill_value=np.nan,
+    )
+    ZZ, XX = np.meshgrid(znd_grid, xl_grid, indexing="ij")  # (n_znd, n_xL)
+    return fn(np.stack([ZZ.ravel(), XX.ravel()], axis=1)).reshape(
+        len(znd_grid), len(xl_grid)
+    )
+
+
+def load_composite_events(path) -> xr.Dataset:
+    """Load per-event composite file written by cloud_root_composite_prep.py."""
+    return xr.open_dataset(str(path))
+
+
+def composite_mean_std(events_ds: xr.Dataset,
+                       vnames: tuple = COMPOSITE_VARS) -> xr.Dataset:
+    """Mean and std of per-event fields in a composite events Dataset.
+
+    Returns Dataset with ``<var>_mean``, ``<var>_std`` (dims: z_nd, xL)
+    and scalar ``n_events``.
+    """
+    out = {}
+    n = events_ds.sizes["event"]
+    for vn in vnames:
+        if vn not in events_ds:
+            continue
+        arr = events_ds[vn].values   # (n_events, n_znd, n_xL)
+        out[f"{vn}_mean"] = xr.DataArray(np.nanmean(arr, axis=0), dims=["z_nd", "xL"])
+        out[f"{vn}_std"]  = xr.DataArray(np.nanstd(arr,  axis=0), dims=["z_nd", "xL"])
+    out["n_events"] = xr.DataArray(np.int32(n))
+    return xr.Dataset(
+        out,
+        coords={"xL": events_ds.xL, "z_nd": events_ds.z_nd},
+        attrs=events_ds.attrs,
+    )
+
+
+def plot_cloud_root_composite(ax_thl, ax_qt,
+                               comp_ds: xr.Dataset,
+                               var_thl: str = "w_thl_mean",
+                               var_qt:  str = "w_qv_mean",
+                               vlim_thl: tuple = None,
+                               vlim_qv:  tuple = None,
+                               label: str = "") -> None:
+    """Colour-mesh plot of a cloud-root composite on (x/L, z/z_sl) axes.
+
+    Parameters
+    ----------
+    ax_thl, ax_qt : matplotlib Axes (left: heat flux, right: moisture flux)
+    comp_ds       : Dataset from composite_mean_std or average_cloud_root_composite.py
+    var_thl, var_qt : variable names in comp_ds
+    vlim_thl, vlim_qv : (vmin, vmax) colour limits; if None, 95th-percentile symmetric
+    label         : string appended to subplot titles
+    """
+    xL   = comp_ds.xL.values
+    z_nd = comp_ds.z_nd.values
 
     def _sym_lim(arr):
-        v = float(np.nanpercentile(np.abs(arr), 95))
-        return -v, v
+        v = float(np.nanpercentile(np.abs(arr[np.isfinite(arr)]), 95))
+        return (-v, v)
+
+    thl_arr = comp_ds[var_thl].values
+    qv_arr  = comp_ds[var_qt].values
 
     if vlim_thl is None:
-        vlim_thl = _sym_lim(flux_thl.values)
+        vlim_thl = _sym_lim(thl_arr)
     if vlim_qv is None:
-        vlim_qv  = _sym_lim(flux_qv.values)
+        vlim_qv = _sym_lim(qv_arr)
 
-    pcm_thl = ax_thl.pcolormesh(x, h, flux_thl.values,
-                                 cmap="RdBu_r", shading="auto",
+    pcm_thl = ax_thl.pcolormesh(xL, z_nd, thl_arr, cmap="RdBu_r", shading="auto",
                                  vmin=vlim_thl[0], vmax=vlim_thl[1])
-    pcm_qv  = ax_qt.pcolormesh( x, h, flux_qv.values,
-                                 cmap="BrBG",   shading="auto",
+    pcm_qv  = ax_qt.pcolormesh( xL, z_nd, qv_arr,  cmap="BrBG",   shading="auto",
                                  vmin=vlim_qv[0],  vmax=vlim_qv[1])
     plt.colorbar(pcm_thl, ax=ax_thl, label="w'θ_l'  (K m s⁻¹)")
     plt.colorbar(pcm_qv,  ax=ax_qt,  label="w'q_v'  (g kg⁻¹ m s⁻¹)")
 
+    n_ev = int(comp_ds["n_events"]) if "n_events" in comp_ds else "?"
     for ax in (ax_thl, ax_qt):
-        ax.set_xlim(-0.6, 0.6)
-        ax.set_ylim(0, zmax_sl)
-        ax.set_xlabel(f"{horiz_dim}/L")
+        ax.axvline(-0.5, color="0.4", lw=0.8, ls="--")
+        ax.axvline( 0.5, color="0.4", lw=0.8, ls="--", label="cloud edge (x/L=±½)")
+        ax.axhline( 1.0, color="0.4", lw=0.8, ls=":",  label="z_sl")
+        ax.set_xlabel("x/L  (or y/L)")
         ax.set_ylabel("z / z_sl")
-        if cloud_mask_1d is not None:
-            pass  # shadow region already centred at 0; shaded area is |x| ≤ 0.5
-        ax.axvspan(-0.5, 0.5, color="gray", alpha=0.08, label="cloud root")
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(0, 1.0)
 
-    L_m   = sl_nd.attrs.get("L_m", "?")
-    z_sl_m = sl_nd.attrs.get("z_sl_m", "?")
-    ax_thl.set_title(f"Cloud-root cross-section  (L={L_m:.0f} m, z_sl={z_sl_m:.0f} m)")
+    suffix = f"  ({n_ev} events)"
+    if label:
+        suffix = f"  {label}" + suffix
+    ax_thl.set_title(f"Composite w'θ_l'{suffix}")
+    ax_qt.set_title( f"Composite w'q_v'{suffix}")
