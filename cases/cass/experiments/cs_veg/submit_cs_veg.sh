@@ -23,7 +23,7 @@ for val in "${CS_VEG_VALUES[@]}"; do
 
     sbatch \
         --constraint=gpu \
-        --time=18:00:00 \
+        --time=10:00:00 \
         --job-name="csv${val}_2s" \
         --export=ALL,SIM_DIRS="$SIM_DIRS" \
         "$SCRIPT_DIR/sbatch_cs_veg.sh"
@@ -38,7 +38,7 @@ for val in "${CS_VEG_VALUES[@]}"; do
 
     sbatch \
         --constraint="gpu&hbm80g" \
-        --time=28:00:00 \
+        --time=22:00:00 \
         --job-name="csv${val}_rt" \
         --export=ALL,SIM_DIRS="$SIM_DIRS" \
         "$SCRIPT_DIR/sbatch_cs_veg.sh"

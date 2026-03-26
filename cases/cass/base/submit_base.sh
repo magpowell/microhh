@@ -17,7 +17,7 @@ SIM_DIRS=$(IFS=':'; echo "${SIM_DIRS_LIST[*]}")
 
 sbatch \
     --constraint=gpu \
-    --time=18:00:00 \
+    --time=10:00:00 \
     --export=ALL,SIM_DIRS="$SIM_DIRS" \
     "$SCRIPT_DIR/sbatch_base.sh"
 echo "Submitted 2stream base job"
@@ -31,7 +31,7 @@ SIM_DIRS=$(IFS=':'; echo "${SIM_DIRS_LIST[*]}")
 
 sbatch \
     --constraint="gpu&hbm80g" \
-    --time=28:00:00 \
+    --time=22:00:00 \
     --export=ALL,SIM_DIRS="$SIM_DIRS" \
     "$SCRIPT_DIR/sbatch_base.sh"
 echo "Submitted raytracer base job"

@@ -325,9 +325,15 @@ def conditioned_means_ensemble(rep_dirs: list, variables=None) -> tuple[dict, di
     if variables is None:
         variables = ["thl_fluxbot", "qt_fluxbot", "sw_flux_dn", "sw_flux_sfc_rt"]
 
+    # sw_flux_sfc_rt is derived (dir+dif) inside load_xy_files, not a real file;
+    # request the components explicitly so the derivation fires.
+    vars_to_load = [v for v in variables if v != "sw_flux_sfc_rt"]
+    if "sw_flux_sfc_rt" in variables:
+        vars_to_load += ["sw_flux_sfc_dir_rt", "sw_flux_sfc_dif_rt"]
+
     per_rep = []
     for d in rep_dirs:
-        ds = load_xy_files(d, variables + ["qlqi_path"], chunks={"time": 200})
+        ds = load_xy_files(d, vars_to_load + ["qlqi_path"], chunks={"time": 200})
         mask = ds["qlqi_path"] > 0
         shaded_means   = {v: ds[v].where(mask).mean(["x", "y"])  for v in variables if v in ds}
         unshaded_means = {v: ds[v].where(~mask).mean(["x", "y"]) for v in variables if v in ds}
@@ -543,8 +549,8 @@ def compute_normalized_cloud_root_profiles(ds_3d: xr.Dataset,
       ``z_sl``         (n_times,)     – sub-cloud layer height per dump (m)
       ``norm_thl``     (n_times,)     – sub-cloud integral of domain-mean heat flux
       ``norm_qv``      (n_times,)     – sub-cloud integral of domain-mean moisture flux
-      ``thl_cloud_nd`` (n_times, n_zeta) – normalised cloud-root heat flux on zeta grid
-      ``qv_cloud_nd``  (n_times, n_zeta) – normalised cloud-root moisture flux on zeta grid
+      ``thl_cloud_nd`` (n_times, n_zeta) – cloud-root/domain-mean heat flux ratio on zeta grid
+      ``qv_cloud_nd``  (n_times, n_zeta) – cloud-root/domain-mean moisture flux ratio on zeta grid
     """
     for req in ("w_prime", "thl_prime", "qv_prime"):
         if req not in ds_3d:
@@ -555,25 +561,37 @@ def compute_normalized_cloud_root_profiles(ds_3d: xr.Dataset,
 
     zeta_grid = np.linspace(0, 1.5, 200)
 
-    thl_cloud_nd_list, qv_cloud_nd_list = [], []
-    norm_thl_list, norm_qv_list         = [], []
-    z_sl_list                           = []
+    thl_cloud_nd_list, qv_cloud_nd_list   = [], []
+    f_cloud_thl_list,  f_cloud_qv_list   = [], []
+    f_free_thl_list,   f_free_qv_list    = [], []
+    f_domain_thl_list, f_domain_qv_list  = [], []
+    cloud_frac_list                      = []
+    norm_thl_list, norm_qv_list          = [], []
+    z_sl_list                            = []
+    t_hours_list                         = []
+
+    # Process all dump times; LST filtering is applied at load time using cached t_hours
+    t_vals  = ds_3d.time.values   # local datetime64 (assigned by load_3d_nc)
+    t_hours = (pd.DatetimeIndex(t_vals).hour
+               + pd.DatetimeIndex(t_vals).minute / 60.0)
 
     xy_times_f = ds_xy.time.values.astype("datetime64[ns]").astype(float)
     st_times_f = stats_mean["t_local"].values.astype("datetime64[ns]").astype(float)
 
-    for tidx_3d in range(ds_3d.sizes["time"]):
+    for tidx_3d in range(len(t_vals)):
         t3d   = ds_3d.time.values[tidx_3d]
         t3d_f = np.datetime64(t3d, "ns").astype(float)
-        ds_t  = ds_3d.isel(time=tidx_3d).load()
+        ds_t  = ds_3d.isel(time=int(tidx_3d)).load()
 
         # Cloud mask from nearest XY time
         mask_2d = cloud_mask_2d(
             ds_xy["qlqi_path"].isel(time=int(np.argmin(np.abs(xy_times_f - t3d_f)))).values
         )
 
-        # z_sl from stats at nearest time
+        # z_sl from stats at nearest time; skip timesteps with no cloud
         z_sl = compute_z_sl(stats_mean, time_idx=int(np.argmin(np.abs(st_times_f - t3d_f))))
+        if z_sl <= 0:
+            continue
 
         # Flux fields
         flux_thl = (ds_t["w_prime"] * ds_t["thl_prime"]).squeeze()
@@ -582,31 +600,59 @@ def compute_normalized_cloud_root_profiles(ds_3d: xr.Dataset,
 
         f_cloud_thl  = flux_thl.where(mask_da).mean(["x", "y"]).values
         f_cloud_qv   = flux_qv.where(mask_da).mean(["x", "y"]).values
+        f_free_thl   = flux_thl.where(~mask_da).mean(["x", "y"]).values
+        f_free_qv    = flux_qv.where(~mask_da).mean(["x", "y"]).values
         f_domain_thl = flux_thl.mean(["x", "y"]).values
         f_domain_qv  = flux_qv.mean(["x", "y"]).values
+        cf           = float(mask_da.mean().values)
 
-        # Sub-cloud integral of domain mean (normalization scalar)
-        scl      = z <= z_sl
-        norm_thl = float(np.trapz(f_domain_thl[scl], z[scl]))
-        norm_qv  = float(np.trapz(f_domain_qv[scl],  z[scl]))
-
-        # Non-dimensionalise z → ζ = z/z_sl(t), interpolate onto common grid
+        # Non-dimensionalise z → ζ = z/z_sl(t), interpolate raw profiles onto common grid
         zeta_t = z / z_sl
-        thl_cloud_nd_list.append(np.interp(zeta_grid, zeta_t, f_cloud_thl / norm_thl))
-        qv_cloud_nd_list.append( np.interp(zeta_grid, zeta_t, f_cloud_qv  / norm_qv))
+        _interp = lambda arr: np.interp(zeta_grid, zeta_t, arr, left=np.nan, right=np.nan)
 
+        f_cloud_thl_list.append(_interp(f_cloud_thl))
+        f_cloud_qv_list.append( _interp(f_cloud_qv))
+        f_free_thl_list.append( _interp(f_free_thl))
+        f_free_qv_list.append(  _interp(f_free_qv))
+        f_domain_thl_list.append(_interp(f_domain_thl))
+        f_domain_qv_list.append( _interp(f_domain_qv))
+        cloud_frac_list.append(cf)
+
+        # Sub-cloud peak normalisation (scalar per timestep, for thl_cloud_nd backward compat)
+        scl      = z <= z_sl
+        norm_thl = float(np.nanmax(np.abs(f_domain_thl[scl]))) if scl.any() else np.nan
+        norm_qv  = float(np.nanmax(np.abs(f_domain_qv[scl])))  if scl.any() else np.nan
         norm_thl_list.append(norm_thl)
         norm_qv_list.append(norm_qv)
+
+        if norm_thl > 1e-6 and norm_qv > 1e-6:
+            thl_cloud_nd_list.append(_interp(f_cloud_thl) / norm_thl)
+            qv_cloud_nd_list.append( _interp(f_cloud_qv)  / norm_qv)
+        else:
+            thl_cloud_nd_list.append(np.full(len(zeta_grid), np.nan))
+            qv_cloud_nd_list.append( np.full(len(zeta_grid), np.nan))
+
         z_sl_list.append(z_sl)
+        t_hours_list.append(t_hours[tidx_3d])
 
     return {
-        "zeta":         zeta_grid,
-        "z":            z,
-        "z_sl":         np.array(z_sl_list),
-        "norm_thl":     np.array(norm_thl_list),
-        "norm_qv":      np.array(norm_qv_list),
-        "thl_cloud_nd": np.array(thl_cloud_nd_list),   # (n_times, n_zeta)
-        "qv_cloud_nd":  np.array(qv_cloud_nd_list),
+        "zeta":          zeta_grid,
+        "z":             z,
+        "z_sl":          np.array(z_sl_list),
+        "norm_thl":      np.array(norm_thl_list),
+        "norm_qv":       np.array(norm_qv_list),
+        "thl_cloud_nd":  np.array(thl_cloud_nd_list),    # (n_times, n_zeta) normalised
+        "qv_cloud_nd":   np.array(qv_cloud_nd_list),
+        # Raw flux profiles on zeta grid — cache these to avoid recomputing if
+        # the normalisation changes
+        "f_cloud_thl":   np.array(f_cloud_thl_list),     # (n_times, n_zeta) K m/s
+        "f_cloud_qv":    np.array(f_cloud_qv_list),      # (n_times, n_zeta) g/kg m/s
+        "f_free_thl":    np.array(f_free_thl_list),      # cloud-free columns
+        "f_free_qv":     np.array(f_free_qv_list),
+        "f_domain_thl":  np.array(f_domain_thl_list),
+        "f_domain_qv":   np.array(f_domain_qv_list),
+        "cloud_frac":    np.array(cloud_frac_list),       # (n_times,) scalar
+        "t_hours":       np.array(t_hours_list),           # (n_times,) LST hours of each dump
     }
 
 
@@ -641,8 +687,8 @@ def plot_normalized_cloud_root_profiles(ax_thl, ax_qt,
         ax.set_ylim(0, 1.2)
         ax.set_ylabel("z / z_sl")
 
-    ax_thl.set_xlabel("w'θ_l' / ∫w'θ_l' dz  (m⁻¹)")
-    ax_qt.set_xlabel("w'q_v' / ∫w'q_v' dz  (m⁻¹)")
+    ax_thl.set_xlabel("w'θ_l' (cloud-root) / w'θ_l' (domain mean)  (−)")
+    ax_qt.set_xlabel("w'q_v' (cloud-root) / w'q_v' (domain mean)  (−)")
     ax_thl.set_title("Normalised cloud-root heat flux")
     ax_qt.set_title("Normalised cloud-root moisture flux")
     ax_thl.legend(fontsize=8)
@@ -786,7 +832,7 @@ def plot_flux_conditioned(ax, t_local, shaded_mean, unshaded_mean,
     um    = np.asarray(unshaded_mean) * scale
     t_num = _to_plottime(t_local)
     ax.plot(t_num, sm, color="steelblue",  ls=ls, label="cloud-root")
-    ax.plot(t_num, um, color="darkorange", ls=ls, label="unshaded")
+    ax.plot(t_num, um, color="darkorange", ls=ls, label="cloud-free")
     if shaded_std is not None:
         _shade_ensemble(ax, t_local, sm, np.asarray(shaded_std) * scale, "steelblue")
     if unshaded_std is not None:
@@ -959,7 +1005,9 @@ def plot_cloud_root_composite(ax_thl, ax_qt,
                                var_qt:  str = "w_qv_mean",
                                vlim_thl: tuple = None,
                                vlim_qv:  tuple = None,
-                               label: str = "") -> None:
+                               label: str = "",
+                               show_xlabel: bool = True,
+                               orient: str = "xz") -> None:
     """Colour-mesh plot of a cloud-root composite on (x/L, z/z_sl) axes.
 
     Parameters
@@ -969,6 +1017,8 @@ def plot_cloud_root_composite(ax_thl, ax_qt,
     var_thl, var_qt : variable names in comp_ds
     vlim_thl, vlim_qv : (vmin, vmax) colour limits; if None, 95th-percentile symmetric
     label         : string appended to subplot titles
+    show_xlabel   : if False, suppress the x-axis label (use for non-bottom rows)
+    orient        : 'xz' or 'yz' — controls the x-axis label
     """
     xL   = comp_ds.xL.values
     z_nd = comp_ds.z_nd.values
@@ -992,12 +1042,20 @@ def plot_cloud_root_composite(ax_thl, ax_qt,
     plt.colorbar(pcm_thl, ax=ax_thl, label="w'θ_l'  (K m s⁻¹)")
     plt.colorbar(pcm_qv,  ax=ax_qt,  label="w'q_v'  (g kg⁻¹ m s⁻¹)")
 
-    n_ev = int(comp_ds["n_events"]) if "n_events" in comp_ds else "?"
+    if "n_events_per_rep" in comp_ds:
+        n_ev = int(comp_ds["n_events_per_rep"].values.sum())
+    elif "n_events" in comp_ds:
+        n_ev = int(comp_ds["n_events"])
+    else:
+        n_ev = "?"
+
+    xlabel = "x/L" if orient == "xz" else "y/L"
     for ax in (ax_thl, ax_qt):
         ax.axvline(-0.5, color="0.4", lw=0.8, ls="--")
-        ax.axvline( 0.5, color="0.4", lw=0.8, ls="--", label="cloud edge (x/L=±½)")
+        ax.axvline( 0.5, color="0.4", lw=0.8, ls="--", label=f"cloud edge ({xlabel}=±½)")
         ax.axhline( 1.0, color="0.4", lw=0.8, ls=":",  label="z_sl")
-        ax.set_xlabel("x/L  (or y/L)")
+        if show_xlabel:
+            ax.set_xlabel(xlabel)
         ax.set_ylabel("z / z_sl")
         ax.set_xlim(-1, 1)
         ax.set_ylim(0, 1.0)

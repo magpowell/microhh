@@ -32,6 +32,7 @@ python experiments/no_aerosols/setup_no_aerosols.py
 python experiments/no_aerosols_zero_wind/setup_no_aerosols_zero_wind.py
 python experiments/cs_veg/setup_cs_veg.py
 python experiments/soil_moisture/setup_soil_moisture.py
+python experiments/wind_u/setup_wind_u.py
 
 # mean_state_nudge: sequential — requires no_aerosols_zero_wind 2stream to have completed first
 # (see Mean-state nudge section below)
@@ -53,6 +54,7 @@ bash experiments/no_aerosols/submit_no_aerosols.sh
 bash experiments/no_aerosols_zero_wind/submit_no_aerosols_zero_wind.sh
 bash experiments/cs_veg/submit_cs_veg.sh
 bash experiments/soil_moisture/submit_soil_moisture.sh
+bash experiments/wind_u/submit_wind_u.sh
 
 # mean_state_nudge (after extracting nudge profiles — see below)
 bash experiments/mean_state_nudge/submit_mean_state_nudge.sh --timescale 3600
@@ -65,6 +67,8 @@ bash experiments/mean_state_nudge/submit_mean_state_nudge.sh --timescale 3600
 bash experiments/no_aerosols/submit_debug_no_aerosols.sh
 bash experiments/no_aerosols_zero_wind/submit_debug_no_aerosols_zero_wind.sh
 bash experiments/soil_moisture/submit_debug_soil_moisture.sh
+bash experiments/wind_u/submit_debug_wind_u.sh         # all 5 values
+bash experiments/wind_u/submit_debug_wind_u.sh 5.0     # single value
 
 # mean_state_nudge debug (requires nudge_profiles.nc first — see below)
 bash experiments/mean_state_nudge/submit_debug_mean_state_nudge.sh \
@@ -112,6 +116,36 @@ interpolates to the `time_ls` grid (15 hourly points), and writes `nudge_profile
 **Nudgefac note**: the nudging timescale applies to u, v, thl, and qt simultaneously — there is
 no per-variable timescale. Start at 3600 s and decrease carefully; the code has no tendency
 limiter (Bart van Stratum, pers. comm.), so overshooting is possible at short timescales.
+
+---
+
+## Wind-u sweep experiment
+
+Varies the constant domain-mean wind speed u ∈ {0, 2.5, 5, 7.5, 10} m/s with aerosols off and
+v=0, to isolate the effect of wind speed on the 3D vs 1D RT LWP difference.
+
+**Key design choice — `swlspres=uflux`**: the geostrophic forcing (`swlspres=geo`) is replaced
+with `swlspres=uflux` which applies a body force each timestep to enforce the exact domain-mean
+u. With `swlspres=geo`, the ERA5 composite geostrophic wind (~0 m/s for CASS days) plus Coriolis
+drains the imposed wind regardless of the nudging timescale. `uflux` gives a clean, apple-to-apple
+comparison. Only v is nudged (toward 0, τ=3 h) to suppress Coriolis rotation.
+
+**u=0 is a new run** (not `no_aerosols_zero_wind`) — the uflux forcing must be consistent across
+all points in the sweep.
+
+```
+Step 1: Set up all 5 wind values (u=0, 2.5, 5, 7.5, 10 m/s)
+        python experiments/wind_u/setup_wind_u.py
+
+Step 2: Debug one or two values first
+        bash experiments/wind_u/submit_debug_wind_u.sh 0.0 5.0
+        # Verify MOM is ~constant in cass.out (not decaying) — confirms uflux is working
+
+Step 3: Production
+        bash experiments/wind_u/submit_wind_u.sh
+```
+
+5 values × 8 runs = 40 runs total.
 
 ---
 

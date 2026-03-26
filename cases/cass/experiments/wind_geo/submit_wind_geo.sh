@@ -1,25 +1,21 @@
 #!/bin/bash
-# Submit CASS soil_moisture experiment runs.
-# For each theta value: 2 jobs (2stream + raytracer), 4 reps each on 1 node.
+# Submit CASS wind_geo experiment runs.
+# For each u value: 2 jobs (2stream + raytracer), 4 reps each on 1 node.
+# u=0.0 excluded (redundant with no_aerosols_zero_wind).
 set -euo pipefail
 
 SCRATCH=${SCRATCH:-/pscratch/sd/m/mpowell}
-EXP="$SCRATCH/CASS_LES/experiments/soil_moisture"
+EXP="$SCRATCH/CASS_LES/experiments/wind_geo"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p "$SCRATCH/CASS_LES/logs"
 
-# theta labels must match setup_soil_moisture.py theta_label() — e.g. 0.1 -> theta_0p1
-declare -A THETA_LABELS=(
-    [0.1]="theta_0p1"
-    [0.2]="theta_0p2"
-    [0.3]="theta_0p3"
-    [0.4]="theta_0p4"
-)
-THETA_VALUES=(0.1 0.2 0.3 0.4)
+# u values and their labels — must match setup_wind_geo.py u_label()
+# e.g. 0.0 -> u_0p0,  2.5 -> u_2p5,  10.0 -> u_10p0
+U_VALUES=(2.5 5.0 7.5 10.0)
 
-for theta in "${THETA_VALUES[@]}"; do
-    label="${THETA_LABELS[$theta]}"
+for u in "${U_VALUES[@]}"; do
+    label="u_$(echo "$u" | sed 's/\./p/')"
     VAL_DIR="$EXP/$label"
 
     # 2stream
@@ -32,10 +28,10 @@ for theta in "${THETA_VALUES[@]}"; do
     sbatch \
         --constraint=gpu \
         --time=10:00:00 \
-        --job-name="sm${label}_2s" \
+        --job-name="wg${label}_2s" \
         --export=ALL,SIM_DIRS="$SIM_DIRS" \
-        "$SCRIPT_DIR/sbatch_soil_moisture.sh"
-    echo "Submitted theta=${theta} 2stream"
+        "$SCRIPT_DIR/sbatch_wind_geo.sh"
+    echo "Submitted wind_geo u=${u} m/s 2stream"
 
     # raytracer
     SIM_DIRS_LIST=()
@@ -47,8 +43,8 @@ for theta in "${THETA_VALUES[@]}"; do
     sbatch \
         --constraint="gpu&hbm80g" \
         --time=22:00:00 \
-        --job-name="sm${label}_rt" \
+        --job-name="wg${label}_rt" \
         --export=ALL,SIM_DIRS="$SIM_DIRS" \
-        "$SCRIPT_DIR/sbatch_soil_moisture.sh"
-    echo "Submitted theta=${theta} raytracer"
+        "$SCRIPT_DIR/sbatch_wind_geo.sh"
+    echo "Submitted wind_geo u=${u} m/s raytracer"
 done

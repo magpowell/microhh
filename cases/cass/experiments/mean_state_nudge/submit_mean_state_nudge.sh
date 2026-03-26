@@ -35,7 +35,7 @@ SIM_DIRS=$(IFS=':'; echo "${SIM_DIRS_LIST[*]}")
 
 sbatch \
     --constraint="gpu&hbm80g" \
-    --time=28:00:00 \
+    --time=22:00:00 \
     --job-name="msn_rt_${TIMESCALE}" \
     --export=ALL,SIM_DIRS="$SIM_DIRS" \
     "$SCRIPT_DIR/sbatch_mean_state_nudge.sh"

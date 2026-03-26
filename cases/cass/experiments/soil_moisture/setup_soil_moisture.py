@@ -109,7 +109,9 @@ def merge_ini(rndseed: int, rt: str, timescale: int = 86400, debug: bool = False
 
 
 def theta_label(theta: float) -> str:
-    return f"theta_{theta:.1f}".replace(".", "p")
+    # Strip trailing zeros so 0.1 → "theta_0p1", 0.125 → "theta_0p125", etc.
+    s = f"{theta:.3f}".rstrip("0").rstrip(".")
+    return "theta_" + s.replace(".", "p")
 
 
 def setup_rep(theta: float, rt: str, rep: int, dry_run: bool, timescale: int = 86400, debug: bool = False):

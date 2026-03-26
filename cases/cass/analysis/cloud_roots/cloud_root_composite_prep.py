@@ -38,6 +38,7 @@ Usage:
 """
 
 import argparse
+import gc
 import sys
 import time as _time
 import numpy as np
@@ -46,7 +47,7 @@ import pandas as pd
 from pathlib import Path
 
 # ── analysis utilities (sibling module) ───────────────────────────────────────
-_ANALYSIS_DIR = Path(__file__).parent
+_ANALYSIS_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(_ANALYSIS_DIR))
 from cass_analysis import (
     load_stats, compute_z_sl,
@@ -124,7 +125,9 @@ def process_rep(run_dir: Path, output_dir: Path, verbose: bool = True) -> dict:
     st_tf  = stats["t_local"].values.astype("datetime64[ns]").astype(np.float64)
 
     # ── Load 3D data (lazy) ───────────────────────────────────────────────────
-    ds_3d    = load_3d_nc(run_dir, variables=FIELDS_3D)
+    # chunks={"time": 1} keeps dask from buffering more than one time step per
+    # variable at once — critical on 512×512×256 grids where one var/step is ~536 MB.
+    ds_3d    = load_3d_nc(run_dir, variables=FIELDS_3D, chunks={"time": 1, "z": -1})
     t_local  = pd.DatetimeIndex(ds_3d.time.values)
     valid_idx = np.where(_in_lst_window(t_local))[0]
 
@@ -206,6 +209,12 @@ def process_rep(run_dir: Path, output_dir: Path, verbose: bool = True) -> dict:
         if verbose:
             print(f"    {str(t3d_raw)[:16]}  z_sl={z_sl:.0f} m  "
                   f"+{n_new['xz']} xz  +{n_new['yz']} yz  events")
+
+        # Explicitly release the loaded time-step arrays before the next iteration.
+        del ds_t
+        gc.collect()
+
+    ds_3d.close()
 
     # ── Write output ──────────────────────────────────────────────────────────
     result = {}

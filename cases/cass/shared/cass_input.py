@@ -15,12 +15,30 @@ import xarray as xr
 parser = argparse.ArgumentParser(description='Generate cass_input.nc for MicroHH')
 parser.add_argument('--zero-winds', action='store_true',
                     help='Set u=v=0 in init and u_nudge=v_nudge=0 in timedep')
+parser.add_argument('--wind-u', type=float, default=None,
+                    help='Set constant u=WIND_U (m/s) in init and u_nudge in timedep; v=0. '
+                         'Mutually exclusive with --zero-winds.')
+parser.add_argument('--geo-wind', type=float, default=None,
+                    help='Set geostrophic wind: u_geo=GEO_WIND (m/s) constant in z, v_geo=0. '
+                         'Initialises u=GEO_WIND, v=0. Mutually exclusive with --wind-u and --zero-winds.')
 parser.add_argument('--theta-nudge', type=float, default=None,
                     help='Add uniform theta_nudge[4] to soil group (e.g. 0.3)')
 parser.add_argument('--nudge-thermo', nargs=2, metavar=('PATH', 'TIMESCALE'),
                     help='Add thl/qt nudge profiles from nudge_profiles.nc at PATH '
                          'and set nudgefac = 1/TIMESCALE (s) uniformly in init group')
+parser.add_argument('--qt-ls', type=float, default=None,
+                    metavar='VALUE',
+                    help='Replace qt_ls with a constant profile: VALUE (g kg-1 day-1) '
+                         'below 2000 m, zero above, constant in time. '
+                         'Overrides the CASS composite qt_ls entirely.')
 args = parser.parse_args()
+
+if args.wind_u is not None and args.zero_winds:
+    parser.error("--wind-u and --zero-winds are mutually exclusive")
+if args.geo_wind is not None and args.zero_winds:
+    parser.error("--geo-wind and --zero-winds are mutually exclusive")
+if args.geo_wind is not None and args.wind_u is not None:
+    parser.error("--geo-wind and --wind-u are mutually exclusive")
 
 float_type = "f8"
 
@@ -170,6 +188,14 @@ for t, block in enumerate(time_blocks):
     vls[t, :] = np.interp(z, z_lsf, vls_data)
     wls[t, :] = np.interp(z, z_lsf, wls_data)
 
+# Replace qt_ls with a constant-in-time, height-stepped profile if requested.
+# Profile: VALUE (g/kg/day → kg/kg/s) below 2000 m, zero above.
+# thl_ls and w_ls are left unchanged (CASS composite).
+if args.qt_ls is not None:
+    qt_ls_rate = args.qt_ls / 86400. / 1e3   # g/kg/day → kg/kg/s
+    qt_ls_profile = np.where(z <= 2000., qt_ls_rate, 0.)
+    qtls = np.tile(qt_ls_profile, (n_times, 1))
+
 
 # -----------------------------------------------------------------------
 # Read pre-computed CAMS aerosol composite (from compute_cams_composite.py).
@@ -210,8 +236,19 @@ nc_group_init = nc_file.createGroup("init")
 add_nc_var('z', ("z",), nc_group_init, z)
 add_nc_var("thl", ("z",), nc_group_init, thl)
 add_nc_var("qt", ("z",), nc_group_init, qt)
-add_nc_var("u", ("z",), nc_group_init, np.zeros(kmax) if args.zero_winds else u)
-add_nc_var("v", ("z",), nc_group_init, np.zeros(kmax) if args.zero_winds else v)
+if args.zero_winds:
+    u_init = np.zeros(kmax); v_init = np.zeros(kmax)
+elif args.wind_u is not None:
+    u_init = np.full(kmax, args.wind_u); v_init = np.zeros(kmax)
+elif args.geo_wind is not None:
+    u_init = np.full(kmax, args.geo_wind); v_init = np.zeros(kmax)
+else:
+    u_init = u; v_init = v
+add_nc_var("u", ("z",), nc_group_init, u_init)
+add_nc_var("v", ("z",), nc_group_init, v_init)
+if args.geo_wind is not None:
+    add_nc_var("u_geo", ("z",), nc_group_init, np.full(kmax, args.geo_wind))
+    add_nc_var("v_geo", ("z",), nc_group_init, np.zeros(kmax))
 nudge_timescale = float(args.nudge_thermo[1]) if args.nudge_thermo else 10800.
 add_nc_var("nudgefac", ("z",), nc_group_init, np.ones(kmax) / nudge_timescale)
 
@@ -235,8 +272,16 @@ add_nc_var("time_ls", ("time_ls",), nc_group_timedep, time_ls)
 add_nc_var("thl_ls", ("time_ls", "z"), nc_group_timedep, thlls)
 add_nc_var("qt_ls", ("time_ls", "z"), nc_group_timedep, qtls)
 add_nc_var("w_ls", ("time_ls", "z"), nc_group_timedep, wls)
-add_nc_var("u_nudge", ("time_ls", "z"), nc_group_timedep, np.zeros_like(uls) if args.zero_winds else uls)
-add_nc_var("v_nudge", ("time_ls", "z"), nc_group_timedep, np.zeros_like(vls) if args.zero_winds else vls)
+if args.zero_winds:
+    u_nudge_arr = np.zeros_like(uls); v_nudge_arr = np.zeros_like(vls)
+elif args.wind_u is not None:
+    u_nudge_arr = np.full_like(uls, args.wind_u); v_nudge_arr = np.zeros_like(vls)
+elif args.geo_wind is not None:
+    u_nudge_arr = np.full_like(uls, args.geo_wind); v_nudge_arr = np.zeros_like(vls)
+else:
+    u_nudge_arr = uls; v_nudge_arr = vls
+add_nc_var("u_nudge", ("time_ls", "z"), nc_group_timedep, u_nudge_arr)
+add_nc_var("v_nudge", ("time_ls", "z"), nc_group_timedep, v_nudge_arr)
 
 # Thermodynamic nudge profiles (mean_state_nudge experiment)
 if args.nudge_thermo:
@@ -328,5 +373,12 @@ print(f"   Initial profiles at z = {z[0]:.1f} to {z[-1]:.1f} m")
 print(f"   Surface fluxes from t = {time_surface[0]:.0f} to {time_surface[-1]:.0f} s")
 print(f"   Large-scale forcings from t = {time_ls[0]:.0f} to {time_ls[-1]:.0f} s")
 print(f"   Aerosols: composite mean over {n_cams} CAMS days (2003-2009)")
+wind_desc = ("zero winds" if args.zero_winds
+             else f"u={args.wind_u:.1f} m/s (constant), v=0" if args.wind_u is not None
+             else f"geo wind ug={args.geo_wind:.1f} m/s, vg=0" if args.geo_wind is not None
+             else "ERA5 composite winds")
+print(f"   winds: {wind_desc}")
 print(f"   nudgefac = 1/{nudge_timescale:.0f} s"
       + (" [thermo nudge ON]" if args.nudge_thermo else " [u,v only]"))
+if args.qt_ls is not None:
+    print(f"   qt_ls: constant {args.qt_ls:+.1f} g/kg/day below 2000 m (overrides CASS composite)")
