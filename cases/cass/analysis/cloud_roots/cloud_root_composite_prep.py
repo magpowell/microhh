@@ -55,15 +55,16 @@ from cass_analysis import (
     cloud_mask_2d, find_cloud_objects,
     chord_length_1d, interp_event_to_std_grid,
     XL_GRID, ZND_GRID, COMPOSITE_VARS,
+    _3D_VARS_CIRC,
 )
 
 # ── Tunable parameters ────────────────────────────────────────────────────────
 LST_MIN_H   = 11.5    # start of compositing window [hours past midnight, local time]
-LST_MAX_H   = 15.5    # end   of compositing window
+LST_MAX_H   = 17.0    # end   of compositing window
 MIN_CHORD_M = 1000.0  # minimum chord length in the slice direction [m]
 PREFILTER_L =  500.0  # effective-diameter pre-filter for find_cloud_objects [m]
                       # (objects smaller than this can't have chord >= MIN_CHORD_M)
-FIELDS_3D   = ["thl", "qt", "ql", "w"]   # variables to load from 3d_to_nc output
+FIELDS_3D   = ["thl", "qt", "ql", "w", "b", "u", "v"]   # variables to load from 3d_to_nc output
 
 
 def _in_lst_window(t_local_arr, lst_min=LST_MIN_H, lst_max=LST_MAX_H):
@@ -84,7 +85,10 @@ def _slice_fields(ds_t: xr.Dataset, cy: int, cx: int,
 
     Returns
     -------
-    (w_thl, w_qv, w_prime, ql, thl_prime, qt_prime)   — each shape (nz, nhoriz)
+    tuple of arrays, each shape (nz, nhoriz):
+        w_thl, w_qv, w_prime, ql, thl_prime, qt_prime,
+        b_prime, horiz_wind_prime
+        (horiz_wind_prime is u' for xz slices, v' for yz slices)
     (horiz_m, z_m)  — coordinate arrays in metres
     """
     sl = ds_t.isel(y=cy) if orientation == "y" else ds_t.isel(x=cx)
@@ -100,10 +104,15 @@ def _slice_fields(ds_t: xr.Dataset, cy: int, cx: int,
     thl_p    = _v("thl_prime")
     qt_p     = _v("qt_prime") * 1e3                   # g/kg
 
+    # Circulation extras (present only when u, v, b were loaded)
+    b_prime          = _v("b_prime")          if "b_prime"          in sl else None
+    horiz_wind_prime = _v("u_prime")          if orientation == "y" else (
+                       _v("v_prime")          if "v_prime"          in sl else None)
+
     horiz_m = (sl["x"] if orientation == "y" else sl["y"]).values.astype(float)
     z_m     = sl["z"].values.astype(float)
 
-    return (w_thl, w_qv, w_prime, ql, thl_p, qt_p), horiz_m, z_m
+    return (w_thl, w_qv, w_prime, ql, thl_p, qt_p, b_prime, horiz_wind_prime), horiz_m, z_m
 
 
 def process_rep(run_dir: Path, output_dir: Path, verbose: bool = True) -> dict:
@@ -127,7 +136,13 @@ def process_rep(run_dir: Path, output_dir: Path, verbose: bool = True) -> dict:
     # ── Load 3D data (lazy) ───────────────────────────────────────────────────
     # chunks={"time": 1} keeps dask from buffering more than one time step per
     # variable at once — critical on 512×512×256 grids where one var/step is ~536 MB.
-    ds_3d    = load_3d_nc(run_dir, variables=FIELDS_3D, chunks={"time": 1, "z": -1})
+    # Use all circulation vars if available; fall back to base set if u/v/b missing.
+    _circ_nc = [run_dir / f"{v}.nc" for v in FIELDS_3D]
+    _load_vars = [v for v, p in zip(FIELDS_3D, _circ_nc) if p.exists()]
+    if set(_load_vars) != set(FIELDS_3D) and verbose:
+        _missing = [v for v, p in zip(FIELDS_3D, _circ_nc) if not p.exists()]
+        print(f"  WARNING: missing {_missing} nc files — circulation fields will be skipped")
+    ds_3d    = load_3d_nc(run_dir, variables=_load_vars, chunks={"time": 1, "z": -1})
     t_local  = pd.DatetimeIndex(ds_3d.time.values)
     valid_idx = np.where(_in_lst_window(t_local))[0]
 
@@ -190,13 +205,19 @@ def process_rep(run_dir: Path, output_dir: Path, verbose: bool = True) -> dict:
                 x_nd = (horiz_m - centroid_m) / chord   # x/L, monotone increasing
 
                 # Interpolate each field onto standard grid
-                (w_thl, w_qv, w_prime, ql, thl_p, qt_p) = fields
+                (w_thl, w_qv, w_prime, ql, thl_p, qt_p,
+                 b_prime, horiz_wind_prime) = fields
                 evt: dict = {}
                 for name, arr in zip(
-                    COMPOSITE_VARS,
+                    ("w_thl", "w_qv", "w_prime", "ql", "thl_prime", "qt_prime"),
                     (w_thl, w_qv, w_prime, ql, thl_p, qt_p),
                 ):
                     evt[name] = interp_event_to_std_grid(arr, x_nd, z_nd)
+                # Circulation extras — only save when arrays are available
+                for name, arr in [("b_prime", b_prime),
+                                  ("horiz_wind_prime", horiz_wind_prime)]:
+                    if arr is not None:
+                        evt[name] = interp_event_to_std_grid(arr, x_nd, z_nd)
 
                 evt["L_m"]    = float(chord)
                 evt["z_sl_m"] = float(z_sl)
@@ -240,6 +261,8 @@ def _save_events(path: Path, evt_list: list[dict]):
     data_vars = {}
 
     for vn in COMPOSITE_VARS:
+        if vn not in evt_list[0]:   # optional vars (b_prime, horiz_wind_prime)
+            continue
         arr = np.stack([e[vn] for e in evt_list], axis=0)  # (n, n_znd, n_xL)
         data_vars[vn] = xr.DataArray(arr, dims=["event", "z_nd", "xL"])
 

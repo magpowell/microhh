@@ -58,6 +58,8 @@ from cass_analysis import (
     seb_residual, evaporative_fraction,
     RunSet, _to_plottime,
     rho, cp, Lv,
+    eps_v, LST_OFFSET, sim_time_to_lst, lst_window_mask,
+    load_sfc_xy, load_sfc_sw_dn,
 )
 from catalog import make_runset, list_group, ALL_EXPERIMENTS
 """
@@ -68,7 +70,7 @@ def config_cell(group, title, sweep_filter="", param_unit="", extra_note=""):
         f'SCRATCH        = Path("/pscratch/sd/m/mpowell/CASS_LES")\n',
         f'COMPOSITE_ROOT = SCRATCH / "analysis/cloud_root_composite"\n',
         f'N_REPS         = 4\n',
-        f'LST_OFF        = 5.5   # t=0 → 05:30 LST\n',
+        f'LST_OFF        = LST_OFFSET   # from cass_analysis (5.5 h)\n',
         f'LST_MIN_H, LST_MAX_H = 12.5, 19.0\n',
         f'\n',
         f'SWEEP_GROUP = "{group}"\n',
@@ -162,12 +164,14 @@ for key, meta in sweep:
 
     if diff is not None:
         cloudy_mask = (lwp_1d > 0.1) | (lwp_rt > 0.1)
-        integral    = lwp_integral(diff, dt_s, cloudy_mask=cloudy_mask)
-        int_std     = float(np.std(
-            [lwp_integral(diff_reps[r], dt_s, cloudy_mask=cloudy_mask)
-             for r in range(n_paired)], ddof=0))
+        int_diff    = lwp_integral(diff, dt_s, cloudy_mask=cloudy_mask)
+        int_1d      = lwp_integral(lwp_1d, dt_s, cloudy_mask=cloudy_mask)
+        norm_int    = int_diff / int_1d * 100 if abs(int_1d) > 1e-6 else np.nan
+        norm_int_std = float(np.std(
+            [lwp_integral(diff_reps[r], dt_s, cloudy_mask=cloudy_mask) / int_1d * 100
+             for r in range(n_paired)], ddof=0)) if abs(int_1d) > 1e-6 else np.nan
     else:
-        integral = int_std = None
+        norm_int = norm_int_std = None
 
     data[key] = dict(
         dirs_2s=dirs_2s, dirs_rt=dirs_rt,
@@ -178,11 +182,11 @@ for key, meta in sweep:
         lwp_1d=lwp_1d, lwp_1d_std=lwp_1d_std,
         lwp_rt=lwp_rt, lwp_rt_std=lwp_rt_std,
         diff=diff, diff_std=diff_std,
-        integral=integral, int_std=int_std,
+        norm_int=norm_int, norm_int_std=norm_int_std,
         t_local_lwp=t_local_lwp, t_num_lwp=t_num_lwp, dt_s=dt_s,
     )
     print(f"  {key:25s}  2s={len(dirs_2s)}  rt={len(dirs_rt)}  "
-          f"integral={integral:+.1f} g m⁻² h" if integral is not None
+          f"norm_int={norm_int:+.1f}%" if norm_int is not None
           else f"  {key:25s}  2s={len(dirs_2s)}  rt=0 (no raytracer)")
 
 available = [k for k in data]
@@ -251,18 +255,18 @@ ax_norm.set_ylabel("(3D − 1D) / 1D  (%)", fontsize=9)
 ax_norm.set_title("(b) Normalised difference")
 ax_norm.xaxis_date()
 
-integrals = [data[k]["integral"] for k in keys_d]
-int_stds  = [data[k]["int_std"]  for k in keys_d]
-colors_v  = [COLORS[k]           for k in keys_d]
+norm_ints = [data[k]["norm_int"] for k in keys_d]
+norm_stds = [data[k]["norm_int_std"] for k in keys_d]
+colors_v  = [COLORS[k]              for k in keys_d]
 x = np.arange(len(keys_d))
-ax_int.bar(x, integrals, color=colors_v, edgecolor="k", lw=0.8, alpha=0.85,
-           yerr=int_stds, capsize=5, error_kw=dict(lw=1.5))
+ax_int.bar(x, norm_ints, color=colors_v, edgecolor="k", lw=0.8, alpha=0.85,
+           yerr=norm_stds, capsize=5, error_kw=dict(lw=1.5))
 ax_int.axhline(0, color="gray", lw=0.7)
 ax_int.set_xticks(x)
 ax_int.set_xticklabels([LABELS[k] for k in keys_d], rotation=15, ha="right", fontsize=9)
 ax_int.set_xlabel(f"{SWEEP_GROUP}  ({PARAM_UNIT})")
-ax_int.set_ylabel(r"$\int$(3D − 1D) LWP  (g m$^{-2}$ h)", fontsize=9)
-ax_int.set_title("(c) Cloudy-period integral")
+ax_int.set_ylabel(r"$\int$(3D $-$ 1D) / $\int$(1D)  (%)", fontsize=9)
+ax_int.set_title("(c) Normalised cloudy-period integral")
 
 for ax in [ax_diff, ax_norm]:
     ax.figure.autofmt_xdate()

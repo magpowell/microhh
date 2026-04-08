@@ -11,12 +11,11 @@ mkdir -p "$SCRATCH/CASS_LES/logs"
 
 # theta labels must match setup_soil_moisture.py theta_label() — e.g. 0.1 -> theta_0p1
 declare -A THETA_LABELS=(
-    [0.1]="theta_0p1"
-    [0.2]="theta_0p2"
-    [0.3]="theta_0p3"
-    [0.4]="theta_0p4"
+    [0.155]="theta_0p155"
+    [0.17]="theta_0p17"
+    [0.185]="theta_0p185"
 )
-THETA_VALUES=(0.1 0.2 0.3 0.4)
+THETA_VALUES=(0.155 0.17 0.185)
 
 for theta in "${THETA_VALUES[@]}"; do
     label="${THETA_LABELS[$theta]}"

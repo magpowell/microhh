@@ -125,6 +125,123 @@ def average_reps(composite_dir: Path, expt: str, rt: str,
     return results
 
 
+def average_reps_windowed(composite_dir: Path, expt: str, rt: str,
+                          windows: list[tuple[float, float]],
+                          window_labels: list[str],
+                          n_reps: int = 4,
+                          verbose: bool = True) -> dict[int, dict[str, xr.Dataset]]:
+    """Like average_reps, but bins events into time windows before averaging.
+
+    Each event's ``dump_t`` (float64 ns-epoch) is converted to LST, then
+    assigned to a window.  Per-rep means are computed within each window,
+    then averaged across reps.
+
+    Parameters
+    ----------
+    windows : list of (lst_lo, lst_hi) tuples — inclusive lower, exclusive upper.
+    window_labels : matching list of human-readable labels.
+
+    Returns
+    -------
+    dict  {window_index: {'xz': xr.Dataset, 'yz': xr.Dataset, 'label': str}}
+    """
+    from sw_surface_composite import dump_t_to_lst
+
+    base_dir = composite_dir / expt / rt
+    n_win = len(windows)
+    results = {}
+
+    for orient in ("xz", "yz"):
+        # Collect per-rep, per-window means
+        # rep_win_means[wi][rep_idx] = {vn: (n_znd, n_xL)}
+        rep_win_means = {wi: [] for wi in range(n_win)}
+        rep_win_counts = {wi: [] for wi in range(n_win)}
+
+        for rep in range(1, n_reps + 1):
+            events_path = base_dir / f"rep_{rep:02d}" / f"events_{orient}.nc"
+            if not events_path.exists():
+                if verbose:
+                    print(f"  SKIP (not found): {events_path}")
+                continue
+
+            ds = xr.open_dataset(str(events_path))
+            dump_t_arr = ds["dump_t"].values  # (n_events,) float64 ns-epoch
+
+            # Convert all dump_t to LST and assign windows
+            lst_arr = np.array([dump_t_to_lst(dt) for dt in dump_t_arr])
+
+            for wi, (lo, hi) in enumerate(windows):
+                mask = (lst_arr >= lo) & (lst_arr < hi)
+                n_ev_win = int(mask.sum())
+                rep_win_counts[wi].append(n_ev_win)
+
+                if n_ev_win == 0:
+                    rep_win_means[wi].append(None)
+                    continue
+
+                rep_mean_vars = {}
+                for vn in COMPOSITE_VARS:
+                    if vn not in ds:
+                        continue
+                    arr = ds[vn].values[mask]  # (n_events_win, n_znd, n_xL)
+                    rep_mean_vars[vn] = np.nanmean(arr, axis=0)
+                rep_win_means[wi].append(rep_mean_vars)
+
+                if verbose:
+                    print(f"  {orient}  rep_{rep:02d}  win {wi} "
+                          f"({window_labels[wi]}): {n_ev_win} events")
+
+            ds.close()
+
+        # Average across reps for each window
+        for wi in range(n_win):
+            valid_reps = [r for r in rep_win_means[wi] if r is not None]
+            if not valid_reps:
+                continue
+
+            n_reps_found = len(valid_reps)
+            out = {}
+
+            for vn in COMPOSITE_VARS:
+                if vn not in valid_reps[0]:
+                    continue
+                stack = np.stack([r[vn] for r in valid_reps], axis=0)
+                out[f"{vn}_mean"] = xr.DataArray(
+                    np.nanmean(stack, axis=0), dims=["z_nd", "xL"])
+                out[f"{vn}_std"] = xr.DataArray(
+                    np.nanstd(stack, axis=0), dims=["z_nd", "xL"])
+                out[f"{vn}_sem"] = xr.DataArray(
+                    np.nanstd(stack, axis=0) / np.sqrt(n_reps_found),
+                    dims=["z_nd", "xL"])
+
+            valid_counts = [c for c in rep_win_counts[wi] if c > 0]
+            out["n_events_per_rep"] = xr.DataArray(
+                np.array(valid_counts, dtype=np.int32), dims=["rep"])
+            out["n_reps"] = xr.DataArray(np.int32(n_reps_found))
+
+            ds_out = xr.Dataset(
+                out,
+                coords={
+                    "xL":   ("xL",   XL_GRID,  {"long_name": "x/L or y/L"}),
+                    "z_nd": ("z_nd", ZND_GRID, {"long_name": "z/z_sl"}),
+                    "rep":  ("rep",  np.arange(n_reps_found) + 1),
+                },
+                attrs={
+                    "expt": expt, "rt": rt, "orientation": orient,
+                    "n_reps": n_reps_found,
+                    "window_label": window_labels[wi],
+                    "window_lst_lo": windows[wi][0],
+                    "window_lst_hi": windows[wi][1],
+                },
+            )
+
+            if wi not in results:
+                results[wi] = {"label": window_labels[wi]}
+            results[wi][orient] = ds_out
+
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__,

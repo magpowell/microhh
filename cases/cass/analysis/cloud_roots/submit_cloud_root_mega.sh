@@ -74,7 +74,10 @@ for val in cs_veg_0 cs_veg_41840 cs_veg_418400; do
 done
 
 # ── soil_moisture ─────────────────────────────────────────────────────────────
-for val in theta_0p1 theta_0p2 theta_0p3 theta_0p4; do
+# Enumerate whatever theta_* dirs exist — handles 0p1, 0p155, 0p17, 0p185, etc.
+for val_path in "$LES_ROOT/experiments/soil_moisture/theta_"*/; do
+    [[ -d "$val_path" ]] || continue
+    val="$(basename "$val_path")"
     add_group "$LES_ROOT/experiments/soil_moisture/$val/2stream"   "$COMPOSITE_ROOT/soil_moisture/$val/2stream"
     add_group "$LES_ROOT/experiments/soil_moisture/$val/raytracer" "$COMPOSITE_ROOT/soil_moisture/$val/raytracer"
 done
@@ -126,7 +129,7 @@ cat > "$tmp_3d" <<HEADER
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=256G
-#SBATCH --time=03:00:00
+#SBATCH --time=01:00:00
 #SBATCH --job-name=3d_to_nc_all
 #SBATCH --output=${LOG_DIR}/3d_to_nc_mega-%j.out
 #SBATCH --error=${LOG_DIR}/3d_to_nc_mega-%j.err
@@ -157,13 +160,13 @@ throttle() {
 }
 
 for rd in "${RUN_DIRS[@]}"; do
-    if [[ -f "$rd/thl.nc" ]]; then
-        echo "SKIP (thl.nc exists): $rd"
+    if [[ -f "$rd/b.nc" && -f "$rd/u.nc" && -f "$rd/v.nc" ]]; then
+        echo "SKIP (b.nc u.nc v.nc exist): $rd"
         continue
     fi
     echo "START: $rd"
     throttle
-    (cd "$rd" && python 3d_to_nc.py -v thl qt ql w \
+    (cd "$rd" && python 3d_to_nc.py -v thl qt ql w b u v \
         >> "${rd}/3d_to_nc.log" 2>&1 \
         && echo "DONE: $rd" \
         || echo "FAIL: $rd") &
@@ -227,8 +230,11 @@ throttle() {
 for i in "${!RUN_DIRS[@]}"; do
     rd="${RUN_DIRS[$i]}"
     od="${OUT_DIRS[$i]}"
-    if [[ -f "$od/events_xz.nc" ]]; then
-        echo "SKIP (events_xz.nc exists): $od"
+    # Skip only if events_xz.nc already has the circulation fields (b_prime, horiz_wind_prime).
+    # Old events without these must be regenerated.
+    if [[ -f "$od/events_xz.nc" ]] && \
+       ncdump -h "$od/events_xz.nc" 2>/dev/null | grep -q 'b_prime'; then
+        echo "SKIP (events_xz.nc has circ fields): $od"
         continue
     fi
     echo "START: $rd"
@@ -250,6 +256,94 @@ echo "Done: $(date)"
 [[ $FAIL -eq 0 ]] || { echo "One or more composites failed — check logs in output dirs."; exit 1; }
 LOGIC
 
+# ── Job 3: sw_surface_composite ───────────────────────────────────────────────
+# Depends on Job 2 (events files must exist). Skips reps whose sw_composite.nc
+# already exists so it is safe to re-run without triggering a full recompute.
+MAX_PAR_SW=32
+
+tmp_sw=$(mktemp /tmp/mega_sw_composite_XXXXXX.sh)
+cat > "$tmp_sw" <<HEADER
+#!/bin/bash
+#SBATCH --qos=regular
+#SBATCH --constraint=cpu
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=128
+#SBATCH --mem=128G
+#SBATCH --time=01:00:00
+#SBATCH --job-name=sw_composite_all
+#SBATCH --output=${LOG_DIR}/sw_composite_mega-%j.out
+#SBATCH --error=${LOG_DIR}/sw_composite_mega-%j.err
+#SBATCH --mail-user=mp4257@columbia.edu
+#SBATCH --mail-type=END,FAIL
+#SBATCH -A m1266
+
+set -euo pipefail
+module load conda
+conda activate xr_env
+
+MAX_PAR=${MAX_PAR_SW}
+SW_SCRIPT='${SCRIPT_DIR}/sw_surface_composite.py'
+
+declare -a RUN_DIRS=(
+${_run_array_lines})
+declare -a OUT_DIRS=(
+${_out_array_lines})
+
+HEADER
+
+cat >> "$tmp_sw" <<'LOGIC'
+echo "=== sw_surface_composite (all reps) ==="
+echo "Start: $(date)"
+echo "Total reps: ${#RUN_DIRS[@]}"
+
+PIDS=()
+FAIL=0
+
+throttle() {
+    while [[ $(jobs -rp | wc -l) -ge $MAX_PAR ]]; do sleep 2; done
+}
+
+for i in "${!RUN_DIRS[@]}"; do
+    rd="${RUN_DIRS[$i]}"
+    od="${OUT_DIRS[$i]}"
+
+    # Skip if output already exists
+    if [[ -f "$od/sw_composite.nc" ]]; then
+        echo "SKIP (sw_composite.nc exists): $od"
+        continue
+    fi
+
+    # Skip if no events files (e.g. run produced no clouds)
+    if [[ ! -f "$od/events_xz.nc" ]] && [[ ! -f "$od/events_yz.nc" ]]; then
+        echo "SKIP (no events): $od"
+        continue
+    fi
+
+    # Derive rt from path: parent of rep_XX dir is the rt type
+    rt=$(basename "$(dirname "$rd")")   # 2stream or raytracer
+
+    echo "START: $rt  $rd"
+    throttle
+    (python "$SW_SCRIPT" \
+        --run-dir  "$rd" \
+        --rt       "$rt" \
+        --comp-dir "$od" \
+        >> "${od}/sw_composite.log" 2>&1 \
+        && echo "DONE: $rd" \
+        || echo "FAIL: $rd  (see ${od}/sw_composite.log)") &
+    PIDS+=($!)
+done
+
+echo "Waiting for ${#PIDS[@]} background job(s)..."
+for pid in "${PIDS[@]}"; do
+    wait "$pid" || FAIL=1
+done
+
+echo "Done: $(date)"
+[[ $FAIL -eq 0 ]] || { echo "One or more sw_composite calls failed — check per-rep logs."; exit 1; }
+LOGIC
+
 # ── Submit ────────────────────────────────────────────────────────────────────
 jid_3d=$(sbatch "$tmp_3d" | awk '{print $NF}')
 echo "Submitted 3d_to_nc:   $jid_3d"
@@ -257,7 +351,10 @@ echo "Submitted 3d_to_nc:   $jid_3d"
 jid_cr=$(sbatch --dependency=afterok:"$jid_3d" "$tmp_cr" | awk '{print $NF}')
 echo "Submitted composite:  $jid_cr  (after $jid_3d)"
 
-rm -f "$tmp_3d" "$tmp_cr"
+jid_sw=$(sbatch --dependency=afterok:"$jid_cr" "$tmp_sw" | awk '{print $NF}')
+echo "Submitted sw_composite: $jid_sw  (after $jid_cr)"
+
+rm -f "$tmp_3d" "$tmp_cr" "$tmp_sw"
 
 echo ""
-echo "2 jobs submitted for $N_REPS reps. Logs: $LOG_DIR"
+echo "3 jobs submitted for $N_REPS reps. Logs: $LOG_DIR"

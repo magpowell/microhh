@@ -48,6 +48,63 @@ except ImportError:
 Lv  = 2.5e6    # J kg⁻¹  latent heat of vaporisation
 cp  = 1005.0   # J kg⁻¹ K⁻¹
 rho = 1.2      # kg m⁻³  reference surface air density
+eps_v = 0.608  # R_v/R_d - 1  (virtual-temperature coefficient)
+
+# ── Simulation time helpers ──────────────────────────────────────────────────
+LST_OFFSET = 5.5   # simulation t=0 → 05:30 LST
+
+
+def sim_time_to_lst(t_sec):
+    """Convert simulation seconds to LST hours."""
+    return np.asarray(t_sec) / 3600.0 + LST_OFFSET
+
+
+def lst_window_mask(t_sec, lo=11.5, hi=17.0):
+    """Boolean mask for timesteps within an LST window."""
+    lst = sim_time_to_lst(t_sec)
+    return (lst >= lo) & (lst <= hi)
+
+
+def load_sfc_xy(run_dir, varname):
+    """Load a single surface xy field, squeezing z/zh singletons.
+
+    Returns (data, t_sec) where data is (nt, ny, nx) float32 and t_sec is
+    the simulation-seconds time axis.
+    """
+    run_dir = Path(run_dir)
+    ds = xr.open_dataset(run_dir / f"{varname}.xy.nc", decode_times=False)
+    arr = ds[varname].values
+    t_sec = ds["time"].values
+    ds.close()
+    # Squeeze singleton z / zh
+    if arr.ndim == 4 and arr.shape[1] == 1:
+        arr = arr[:, 0, :, :]
+    return arr, t_sec
+
+
+def load_sfc_sw_dn(run_dir):
+    """Load surface SW↓, handling 2stream vs raytracer file conventions.
+
+    Returns (sw_dn, t_sec) where sw_dn is (nt, ny, nx).
+    """
+    run_dir = Path(run_dir)
+    rt_file = run_dir / "sw_flux_sfc_dir_rt.xy.nc"
+    if rt_file.exists():
+        ds_dir = xr.open_dataset(rt_file, decode_times=False)
+        ds_dif = xr.open_dataset(
+            run_dir / "sw_flux_sfc_dif_rt.xy.nc", decode_times=False)
+        sw = ds_dir["sw_flux_sfc_dir_rt"].values + ds_dif["sw_flux_sfc_dif_rt"].values
+        t_sec = ds_dir["time"].values
+        ds_dir.close(); ds_dif.close()
+        return sw, t_sec
+    # 2stream fallback
+    ds = xr.open_dataset(run_dir / "sw_flux_dn.xy.nc", decode_times=False)
+    sw = ds["sw_flux_dn"].values
+    t_sec = ds["time"].values
+    ds.close()
+    if sw.ndim == 4:
+        sw = sw[:, 0, :, :]
+    return sw, t_sec
 
 # ── Style maps (keep consistent across all notebooks) ────────────────────────
 RT_STYLE = {
@@ -188,6 +245,10 @@ def load_stats(run_dir) -> dict:
         qt      = np.asarray(thm.variables["qt"][:]),
         ql      = np.asarray(thm.variables["ql"][:]),
         ql_frac = np.asarray(thm.variables["ql_frac"][:]),   # (time, nz)
+        # Dynamics profiles at z
+        u       = np.asarray(ds.groups["default"].variables["u"][:]),
+        v       = np.asarray(ds.groups["default"].variables["v"][:]),
+        tke     = np.asarray(ds.groups["default"].variables["tke"][:]),
     )
     ds.close()
     return out
@@ -337,16 +398,17 @@ def conditioned_means_ensemble(rep_dirs: list, variables=None) -> tuple[dict, di
         mask = ds["qlqi_path"] > 0
         shaded_means   = {v: ds[v].where(mask).mean(["x", "y"])  for v in variables if v in ds}
         unshaded_means = {v: ds[v].where(~mask).mean(["x", "y"]) for v in variables if v in ds}
-        per_rep.append({"shaded": shaded_means, "unshaded": unshaded_means})
+        domain_means   = {v: ds[v].mean(["x", "y"])              for v in variables if v in ds}
+        per_rep.append({"shaded": shaded_means, "unshaded": unshaded_means, "domain": domain_means})
 
     nt_min = min(
         per_rep[0]["shaded"][list(per_rep[0]["shaded"])[0]].sizes["time"]
         for _ in per_rep
     )
 
-    out_mean = {"shaded": {}, "unshaded": {}}
-    out_std  = {"shaded": {}, "unshaded": {}}
-    for kind in ("shaded", "unshaded"):
+    out_mean = {"shaded": {}, "unshaded": {}, "domain": {}}
+    out_std  = {"shaded": {}, "unshaded": {}, "domain": {}}
+    for kind in ("shaded", "unshaded", "domain"):
         for var in per_rep[0][kind]:
             stack = xr.concat(
                 [r[kind][var].isel(time=slice(None, nt_min)) for r in per_rep],
@@ -361,17 +423,22 @@ def conditioned_means_ensemble(rep_dirs: list, variables=None) -> tuple[dict, di
 # 3D dump loading  (requires 3d_to_nc.py to have been run first)
 # ══════════════════════════════════════════════════════════════════════════════
 
+_3D_VARS_DEFAULT = ["thl", "qt", "ql", "w", "b"]
+_3D_VARS_CIRC    = ["thl", "qt", "ql", "w", "b", "u", "v"]
+
+
 def load_3d_nc(run_dir, variables=None, chunks=None) -> xr.Dataset:
     """Load 3D netCDF dump files produced by ``python/3d_to_nc.py``.
 
     Expects files named ``{var}.nc`` in *run_dir*.  Adds perturbation fields
-    (w_prime, thl_prime, qt_prime) and interpolates w to cell-centre levels.
+    (w_prime, thl_prime, qt_prime, b_prime, u_prime, v_prime) and interpolates
+    staggered fields (w, u, v) to cell-centre levels.
 
     Prerequisites
     -------------
     From the run directory, run::
 
-        python $MICROHH/python/3d_to_nc.py -v thl qt ql w b
+        python $MICROHH/python/3d_to_nc.py -v thl qt ql w b u v
 
     Parameters
     ----------
@@ -397,7 +464,7 @@ def load_3d_nc(run_dir, variables=None, chunks=None) -> xr.Dataset:
     ds = xr.open_mfdataset([str(p) for p in paths], decode_times=False, chunks=chunks)
 
     # Perturbations from instantaneous horizontal mean
-    for var, prime in [("thl", "thl_prime"), ("qt", "qt_prime")]:
+    for var, prime in [("thl", "thl_prime"), ("qt", "qt_prime"), ("b", "b_prime")]:
         if var in ds:
             ds[prime] = ds[var] - ds[var].mean(["x", "y"])
 
@@ -410,6 +477,14 @@ def load_3d_nc(run_dir, variables=None, chunks=None) -> xr.Dataset:
     if "w" in ds and "z" in ds.coords:
         ds["w_cc"]    = ds["w"].interp(zh=ds["z"])
         ds["w_prime"] = ds["w_cc"] - ds["w_cc"].mean(["x", "y"])
+
+    # Interpolate u (on xh) and v (on yh) to cell-centre grids and compute primes
+    if "u" in ds and "x" in ds.coords:
+        ds["u_cc"]    = ds["u"].interp(xh=ds["x"])
+        ds["u_prime"] = ds["u_cc"] - ds["u_cc"].mean(["x", "y"])
+    if "v" in ds and "y" in ds.coords:
+        ds["v_cc"]    = ds["v"].interp(yh=ds["y"])
+        ds["v_prime"] = ds["v_cc"] - ds["v_cc"].mean(["x", "y"])
 
     # Cloud mask at each level
     if "ql" in ds:
@@ -917,7 +992,11 @@ XL_GRID  = np.linspace(-1.0, 1.0, 200)   # x/L (or y/L) axis
 ZND_GRID = np.linspace( 0.0, 1.0, 100)   # z/z_sl axis
 
 # Variables saved per event (keys used in events_xz.nc / events_yz.nc)
-COMPOSITE_VARS = ("w_thl", "w_qv", "w_prime", "ql", "thl_prime", "qt_prime")
+COMPOSITE_VARS = (
+    "w_thl", "w_qv", "w_prime", "ql", "thl_prime", "qt_prime",
+    # circulation composite extras (added when u, v, b are included in prep)
+    "b_prime", "horiz_wind_prime",
+)
 
 
 def chord_length_1d(labeled: np.ndarray, label: int,
@@ -1065,3 +1144,84 @@ def plot_cloud_root_composite(ax_thl, ax_qt,
         suffix = f"  {label}" + suffix
     ax_thl.set_title(f"Composite w'θ_l'{suffix}")
     ax_qt.set_title( f"Composite w'q_v'{suffix}")
+
+
+def plot_circulation_composite(ax, comp_ds: xr.Dataset,
+                                vlim_b: tuple = None,
+                                label: str = "",
+                                show_xlabel: bool = True,
+                                orient: str = "xz",
+                                quiver_stride: tuple = (10, 5),
+                                quiver_scale: float = None,
+                                show_colorbar: bool = True):
+    """Colour-mesh of b' with (horiz_wind', w') circulation vectors overlaid.
+
+    Parameters
+    ----------
+    ax            : matplotlib Axes
+    comp_ds       : Dataset from composite_mean_std / average_reps; must contain
+                    b_prime_mean, horiz_wind_prime_mean, w_prime_mean.
+    vlim_b        : (vmin, vmax) colour limits for b'; if None, 98th-percentile symmetric.
+    label         : string appended to subplot title.
+    show_xlabel   : if False, suppress the x-axis label (use for non-bottom rows).
+    orient        : 'xz' or 'yz' — controls the x-axis label.
+    quiver_stride : (stride_x, stride_z) subsampling of the standard grid for quivers.
+    quiver_scale  : passed to ax.quiver ``scale``; if None, matplotlib auto-scales.
+    show_colorbar : if False, suppress the per-axes colorbar (for shared-cbar layouts).
+
+    Returns
+    -------
+    pcm : QuadMesh returned by pcolormesh (for creating a shared colorbar).
+    """
+    xL   = comp_ds.xL.values
+    z_nd = comp_ds.z_nd.values
+
+    b_arr = comp_ds["b_prime_mean"].values
+    u_arr = comp_ds["horiz_wind_prime_mean"].values   # u' (xz) or v' (yz)
+    w_arr = comp_ds["w_prime_mean"].values
+
+    if vlim_b is None:
+        v = float(np.nanpercentile(np.abs(b_arr[np.isfinite(b_arr)]), 98))
+        vlim_b = (-v, v)
+
+    pcm = ax.pcolormesh(xL, z_nd, b_arr, cmap="RdBu_r", shading="auto",
+                        vmin=vlim_b[0], vmax=vlim_b[1])
+    if show_colorbar:
+        plt.colorbar(pcm, ax=ax, label="b'  (m s⁻²)")
+
+    # Quiver on subsampled grid
+    sx, sz = quiver_stride
+    xi = np.arange(0, len(xL),   sx)
+    zi = np.arange(0, len(z_nd), sz)
+    Xq, Zq = np.meshgrid(xL[xi], z_nd[zi])
+    Uq = u_arr[np.ix_(zi, xi)]
+    Wq = w_arr[np.ix_(zi, xi)]
+
+    qkw = dict(pivot="mid", color="k", linewidth=0.4, alpha=0.75)
+    if quiver_scale is not None:
+        qkw["scale"] = quiver_scale
+    ax.quiver(Xq, Zq, Uq, Wq, **qkw)
+
+    if "n_events_per_rep" in comp_ds:
+        n_ev = int(comp_ds["n_events_per_rep"].values.sum())
+    elif "n_events" in comp_ds:
+        n_ev = int(comp_ds["n_events"])
+    else:
+        n_ev = "?"
+
+    xlabel = "x/L" if orient == "xz" else "y/L"
+    wind_label = "u'" if orient == "xz" else "v'"
+    ax.axvline(-0.5, color="0.4", lw=0.8, ls="--")
+    ax.axvline( 0.5, color="0.4", lw=0.8, ls="--")
+    ax.axhline( 1.0, color="0.4", lw=0.8, ls=":")
+    if show_xlabel:
+        ax.set_xlabel(xlabel)
+    ax.set_ylabel("z / z_sl")
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(0, 1.0)
+
+    suffix = f"  ({n_ev} events)"
+    if label:
+        suffix = f"  {label}" + suffix
+    ax.set_title(f"Composite b' + ({wind_label}, w') circulation{suffix}")
+    return pcm

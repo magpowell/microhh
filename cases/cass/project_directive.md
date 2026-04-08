@@ -11,6 +11,7 @@ Run paired 2stream (1D) and raytracer (3D) simulations across seven experiment s
 5. `mean_state_nudge` — aggressive thl/qt nudging of raytracer toward no_aerosols_zero_wind 2stream mean state, isolating the direct 3D RT effect from the mean-state-divergence pathway
 6. `wind_u` — constant u wind sweep (0, 2.5, 5, 7.5, 10 m/s), aerosols off; `swlspres=uflux` enforces exact domain-mean u (slab flow, no shear)
 7. `wind_geo` — geostrophic wind sweep (2.5, 5, 7.5, 10 m/s), aerosols off; `swlspres=geo` with constant `u_geo=VALUE`, `v_geo=0`; Ekman spiral and wind shear develop naturally
+8. `sw_scale` — 3D SW heterogeneity with mean-corrected surface forcing; raytracer surface SW scaled each timestep so mean = 2stream mean; isolates spatial redistribution effect
 
 ---
 
@@ -388,6 +389,40 @@ Mutually exclusive with `--zero-winds` and `--wind-u`.
 identical to zero winds).
 
 **Run structure**: 4 values × 8 runs = 32 new runs
+
+---
+
+## Experiment: sw_scale
+
+**Science**: Isolate the effect of 3D SW spatial heterogeneity while enforcing that the
+domain-mean surface SW forcing matches the 1D (2stream) solution. At each radiation timestep,
+the raytracer surface downwelling SW flux field is multiplied by a scalar
+`scale_factor = mean(sw_2stream_sfc) / mean(sw_raytracer_sfc)`, preserving the
+spatial pattern (3D heterogeneity) but correcting the mean. This answers: do LWP differences
+persist when the mean radiative forcing is identical between 1D and 3D — i.e., is the effect
+purely spatial redistribution?
+
+The 2stream fluxes are already computed internally during every raytracer timestep (MicroHH
+always runs 2stream alongside the raytracer), so no separate 1D simulation is required.
+Scaling is applied only to `sw_flux_dn_sfc` (surface downwelling SW), which drives the LSM.
+Atmospheric heating rates are untouched. The scale factor is output as a time series stat
+`sw_scale_factor` for diagnostics.
+
+**Configuration** (on top of base):
+- `[aerosol] swaerosol = false`
+- `[radiation] swscalesfc_to_2str = true`
+- Zero winds (`--zero-winds` flag to `cass_input.py`)
+
+**Comparison baseline**: `no_aerosols_zero_wind` raytracer (unscaled 3D). The 1D reference
+is `no_aerosols_zero_wind` 2stream (already run).
+
+**Run structure**: raytracer only, 4 reps (no 2stream runs needed)
+
+**Source code changes** (branch `mpowell-local`):
+- `include/radiation_rrtmgp_rt.h`: `sw_scale_sfc_to_2str`, `sw_scale_factor`, GPU buffers
+- `src/radiation_rrtmgp_rt.cxx`: INI option `swscalesfc_to_2str`, stats time series
+- `src/radiation_rrtmgp_rt.cu`: `scale_field_2d` kernel, alloc/free of 2str temp buffers,
+  scaling logic after `store_surface_fluxes_rt`, stats output
 
 ---
 

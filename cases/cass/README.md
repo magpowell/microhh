@@ -33,6 +33,7 @@ python experiments/no_aerosols_zero_wind/setup_no_aerosols_zero_wind.py
 python experiments/cs_veg/setup_cs_veg.py
 python experiments/soil_moisture/setup_soil_moisture.py
 python experiments/wind_u/setup_wind_u.py
+python experiments/sw_scale/setup_sw_scale.py
 
 # mean_state_nudge: sequential — requires no_aerosols_zero_wind 2stream to have completed first
 # (see Mean-state nudge section below)
@@ -55,6 +56,7 @@ bash experiments/no_aerosols_zero_wind/submit_no_aerosols_zero_wind.sh
 bash experiments/cs_veg/submit_cs_veg.sh
 bash experiments/soil_moisture/submit_soil_moisture.sh
 bash experiments/wind_u/submit_wind_u.sh
+bash experiments/sw_scale/submit_sw_scale.sh
 
 # mean_state_nudge (after extracting nudge profiles — see below)
 bash experiments/mean_state_nudge/submit_mean_state_nudge.sh --timescale 3600
@@ -69,6 +71,7 @@ bash experiments/no_aerosols_zero_wind/submit_debug_no_aerosols_zero_wind.sh
 bash experiments/soil_moisture/submit_debug_soil_moisture.sh
 bash experiments/wind_u/submit_debug_wind_u.sh         # all 5 values
 bash experiments/wind_u/submit_debug_wind_u.sh 5.0     # single value
+bash experiments/sw_scale/submit_debug_sw_scale.sh
 
 # mean_state_nudge debug (requires nudge_profiles.nc first — see below)
 bash experiments/mean_state_nudge/submit_debug_mean_state_nudge.sh \
@@ -146,6 +149,32 @@ Step 3: Production
 ```
 
 5 values × 8 runs = 40 runs total.
+
+---
+
+## sw_scale experiment
+
+Runs the raytracer with `swscalesfc_to_2str=true`. At each radiation timestep the
+surface SW downwelling flux is multiplied by `mean(sw_2stream_sfc) / mean(sw_raytracer_sfc)`,
+preserving 3D heterogeneity but enforcing the same domain-mean forcing as the 1D solution.
+No separate 2stream runs are needed — the 1D fluxes are computed internally every timestep.
+The scale factor is output as `sw_scale_factor` in the `radiation` stats group.
+
+```
+Step 1: Set up run dirs
+        python experiments/sw_scale/setup_sw_scale.py
+
+Step 2: Debug first
+        bash experiments/sw_scale/submit_debug_sw_scale.sh
+        # Check sw_scale_factor in cass.default.0000000.nc — should be ~1 in clear sky,
+        # < 1 when 3D RT scatters more into the domain than 1D, etc.
+
+Step 3: Production
+        bash experiments/sw_scale/submit_sw_scale.sh
+```
+
+Requires the `swscalesfc_to_2str` feature on branch `mpowell-local`.
+4 raytracer reps only (no 2stream runs needed for this experiment).
 
 ---
 
