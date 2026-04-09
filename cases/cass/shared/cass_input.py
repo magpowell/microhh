@@ -21,11 +21,6 @@ parser.add_argument('--wind-u', type=float, default=None,
 parser.add_argument('--geo-wind', type=float, default=None,
                     help='Set geostrophic wind: u_geo=GEO_WIND (m/s) constant in z, v_geo=0. '
                          'Initialises u=GEO_WIND, v=0. Mutually exclusive with --wind-u and --zero-winds.')
-parser.add_argument('--theta-nudge', type=float, default=None,
-                    help='Add uniform theta_nudge[4] to soil group (e.g. 0.3)')
-parser.add_argument('--nudge-thermo', nargs=2, metavar=('PATH', 'TIMESCALE'),
-                    help='Add thl/qt nudge profiles from nudge_profiles.nc at PATH '
-                         'and set nudgefac = 1/TIMESCALE (s) uniformly in init group')
 parser.add_argument('--qt-ls', type=float, default=None,
                     metavar='VALUE',
                     help='Replace qt_ls with a constant profile: VALUE (g kg-1 day-1) '
@@ -249,7 +244,7 @@ add_nc_var("v", ("z",), nc_group_init, v_init)
 if args.geo_wind is not None:
     add_nc_var("u_geo", ("z",), nc_group_init, np.full(kmax, args.geo_wind))
     add_nc_var("v_geo", ("z",), nc_group_init, np.zeros(kmax))
-nudge_timescale = float(args.nudge_thermo[1]) if args.nudge_thermo else 10800.
+nudge_timescale = 10800.
 add_nc_var("nudgefac", ("z",), nc_group_init, np.ones(kmax) / nudge_timescale)
 
 # Aerosol initial profiles: composite-mean on LES z grid
@@ -282,25 +277,6 @@ else:
     u_nudge_arr = uls; v_nudge_arr = vls
 add_nc_var("u_nudge", ("time_ls", "z"), nc_group_timedep, u_nudge_arr)
 add_nc_var("v_nudge", ("time_ls", "z"), nc_group_timedep, v_nudge_arr)
-
-# Thermodynamic nudge profiles (mean_state_nudge experiment)
-if args.nudge_thermo:
-    import netCDF4 as _nc2
-    nudge_path = args.nudge_thermo[0]
-    print(f"Reading thermodynamic nudge profiles from {nudge_path}...")
-    with _nc2.Dataset(nudge_path) as nf:
-        thl_nudge_data = nf.variables["thl_nudge"][:].data.copy()
-        qt_nudge_data  = nf.variables["qt_nudge"][:].data.copy()
-        t_nudge        = nf.variables["time_ls"][:].data.copy()
-    # Verify time coordinate matches
-    if not np.allclose(t_nudge, time_ls, atol=1.0):
-        raise ValueError(
-            f"nudge_profiles.nc time_ls does not match cass_input.nc time_ls.\n"
-            f"  nudge: {t_nudge}\n  input: {time_ls}"
-        )
-    add_nc_var("thl_nudge", ("time_ls", "z"), nc_group_timedep, thl_nudge_data)
-    add_nc_var("qt_nudge",  ("time_ls", "z"), nc_group_timedep, qt_nudge_data)
-    print(f"   thl_nudge and qt_nudge written (timescale={nudge_timescale:.0f} s)")
 
 
 # Radiation variables on LES grid.
@@ -353,18 +329,12 @@ ls2d_soil = xr.open_dataset('cass_ls2d_input.nc', group = 'soil')
 nc_soil = nc_file.createGroup('soil')
 add_nc_dim('z', ls2d_soil.sizes['z'], nc_soil)
 add_nc_var('z', ('z'), nc_soil, ls2d_soil.z.values)
-theta_soil_init = (
-    np.full(ls2d_soil.sizes['z'], args.theta_nudge)
-    if args.theta_nudge is not None
-    else ls2d_soil.theta_soil.values
-)
+theta_soil_init = ls2d_soil.theta_soil.values
 add_nc_var('theta_soil', ('z'), nc_soil, theta_soil_init)
 add_nc_var('t_soil', ('z'), nc_soil, ls2d_soil.t_soil.values)
 add_nc_var('index_soil', ('z'), nc_soil, ls2d_soil.index_soil.values)
 add_nc_var('root_frac', ('z'), nc_soil, ls2d_soil.root_frac.values)
 
-if args.theta_nudge is not None:
-    add_nc_var('theta_nudge', ('z'), nc_soil, np.full(ls2d_soil.sizes['z'], args.theta_nudge))
 
 nc_file.close()
 
@@ -378,7 +348,6 @@ wind_desc = ("zero winds" if args.zero_winds
              else f"geo wind ug={args.geo_wind:.1f} m/s, vg=0" if args.geo_wind is not None
              else "ERA5 composite winds")
 print(f"   winds: {wind_desc}")
-print(f"   nudgefac = 1/{nudge_timescale:.0f} s"
-      + (" [thermo nudge ON]" if args.nudge_thermo else " [u,v only]"))
+print(f"   nudgefac = 1/{nudge_timescale:.0f} s [u,v only]")
 if args.qt_ls is not None:
     print(f"   qt_ls: constant {args.qt_ls:+.1f} g/kg/day below 2000 m (overrides CASS composite)")

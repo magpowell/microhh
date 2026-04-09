@@ -9,13 +9,13 @@ Usage
     from catalog import make_runset, list_group, ALL_EXPERIMENTS
 
     # One experiment
-    rs = make_runset("base")
+    rs = make_runset("no_aerosols_zero_wind")
 
-    # All cs_veg sweep experiments (sorted by param)
-    for key, meta in list_group("cs_veg"):
+    # All experiments in a sweep group (sorted by param)
+    for key, meta in list_group("rs_scale"):
         rs = make_runset(key)
         label = meta["label"]
-        param = meta["param"]   # cs_veg value (J m-2 K-1)
+        param = meta["param"]
 """
 
 import os
@@ -64,152 +64,10 @@ ALL_EXPERIMENTS: dict[str, dict] = {
         group  = "aerosol",
         color  = "C1",
     ),
-    # ── cs_veg sweep  (aerosols off, zero wind) ───────────────────────────────
-    "cs_veg_0": dict(
-        label  = r"$c_s = 0$",
-        root   = CASS_ROOT / "experiments/cs_veg/cs_veg_0",
-        group  = "cs_veg",
-        param  = 0,
-        color  = "#e8c99a",
-    ),
-    "cs_veg_41840": dict(
-        label  = r"$c_s = 4.2\times10^4$",
-        root   = CASS_ROOT / "experiments/cs_veg/cs_veg_41840",
-        group  = "cs_veg",
-        param  = 41_840,
-        color  = "#c9903c",
-    ),
-    "cs_veg_418400": dict(
-        label  = r"$c_s = 4.2\times10^5$",
-        root   = CASS_ROOT / "experiments/cs_veg/cs_veg_418400",
-        group  = "cs_veg",
-        param  = 418_400,
-        color  = "#a0522d",
-    ),
-    "cs_veg_4184000": dict(
-        label  = r"$c_s = 4.2\times10^6$",
-        root   = CASS_ROOT / "experiments/cs_veg/cs_veg_4184000",
-        group  = "cs_veg",
-        param  = 4_184_000,
-        color  = "#7a3217",
-    ),
-    "cs_veg_41840000": dict(
-        label  = r"$c_s = 4.2\times10^7$",
-        root   = CASS_ROOT / "experiments/cs_veg/cs_veg_41840000",
-        group  = "cs_veg",
-        param  = 41_840_000,
-        color  = "#4a1a08",
-    ),
-    # ── soil_moisture sweep  (aerosols off, zero wind) ────────────────────────
-    # "theta_0p1": dict(
-    #     label  = r"$\theta = 0.1$",
-    #     root   = CASS_ROOT / "experiments/soil_moisture/theta_0p1",
-    #     group  = "soil_moisture",
-    #     param  = 0.1,
-    #     color  = "#9ecae1",
-    # ),
-    "theta_0p155": dict(
-        label  = r"$\theta = 0.155$",
-        root   = CASS_ROOT / "experiments/soil_moisture/theta_0p155",
-        group  = "soil_moisture",
-        param  = 0.155,
-        color  = "#7eb5d6",
-    ),
-    "theta_0p17": dict(
-        label  = r"$\theta = 0.170$",
-        root   = CASS_ROOT / "experiments/soil_moisture/theta_0p17",
-        group  = "soil_moisture",
-        param  = 0.170,
-        color  = "#62a8cf",
-    ),
-    "theta_0p185": dict(
-        label  = r"$\theta = 0.185$",
-        root   = CASS_ROOT / "experiments/soil_moisture/theta_0p185",
-        group  = "soil_moisture",
-        param  = 0.185,
-        color  = "#4d9bc8",
-    ),
-    "theta_0p2": dict(
-        label  = r"$\theta = 0.2$",
-        root   = CASS_ROOT / "experiments/soil_moisture/theta_0p2",
-        group  = "soil_moisture",
-        param  = 0.2,
-        color  = "#4292c6",
-    ),
-    "theta_0p225": dict(
-        label  = r"$\theta = 0.225$",
-        root   = CASS_ROOT / "experiments/soil_moisture/theta_0p225",
-        group  = "soil_moisture",
-        param  = 0.225,
-        color  = "#3a8ac2",
-    ),
-    "theta_0p25": dict(
-        label  = r"$\theta = 0.25$",
-        root   = CASS_ROOT / "experiments/soil_moisture/theta_0p25",
-        group  = "soil_moisture",
-        param  = 0.25,
-        color  = "#3282be",
-    ),
-    # "theta_0p3": dict(
-    #     label  = r"$\theta = 0.3$",
-    #     root   = CASS_ROOT / "experiments/soil_moisture/theta_0p3",
-    #     group  = "soil_moisture",
-    #     param  = 0.3,
-    #     color  = "#2171b5",
-    # ),
-    # "theta_0p4": dict(
-    #     label  = r"$\theta = 0.4$",
-    #     root   = CASS_ROOT / "experiments/soil_moisture/theta_0p4",
-    #     group  = "soil_moisture",
-    #     param  = 0.4,
-    #     color  = "#084594",
-    # ),
-    # ── mean_state_nudge  (raytracer only; control is no_aerosols_zero_wind 2stream) ──
-    "mean_state_nudge_3600s": dict(
-        label    = r"Nudged RT ($\tau = 3600\,\mathrm{s}$)",
-        root     = CASS_ROOT / "experiments/mean_state_nudge/nudge_3600s",
-        group    = "mean_state_nudge",
-        rt_types = ("raytracer",),
-        param    = 3600,
-        color    = "C1",
-    ),
-    # ── wind_u sweep  (aerosols off; swlspres=uflux) ─────────────────────────
-    "wind_u_0p0": dict(
-        label  = r"$u = 0\,\mathrm{m\,s^{-1}}$",
-        root   = CASS_ROOT / "experiments/wind_u/u_0p0",
-        group  = "wind_u",
-        param  = 0.0,
-        color  = "#dadaeb",
-    ),
-    "wind_u_2p5": dict(
-        label  = r"$u = 2.5\,\mathrm{m\,s^{-1}}$",
-        root   = CASS_ROOT / "experiments/wind_u/u_2p5",
-        group  = "wind_u",
-        param  = 2.5,
-        color  = "#9e9ac8",
-    ),
-    "wind_u_5p0": dict(
-        label  = r"$u = 5\,\mathrm{m\,s^{-1}}$",
-        root   = CASS_ROOT / "experiments/wind_u/u_5p0",
-        group  = "wind_u",
-        param  = 5.0,
-        color  = "#756bb1",
-    ),
-    "wind_u_7p5": dict(
-        label  = r"$u = 7.5\,\mathrm{m\,s^{-1}}$",
-        root   = CASS_ROOT / "experiments/wind_u/u_7p5",
-        group  = "wind_u",
-        param  = 7.5,
-        color  = "#54278f",
-    ),
-    "wind_u_10p0": dict(
-        label  = r"$u = 10\,\mathrm{m\,s^{-1}}$",
-        root   = CASS_ROOT / "experiments/wind_u/u_10p0",
-        group  = "wind_u",
-        param  = 10.0,
-        color  = "#3f007d",
-    ),
 }
+
+# Archived experiments (data on HPSS, recoverable from git history):
+# cs_veg, soil_moisture, mean_state_nudge, wind_u
 
 
 # ══════════════════════════════════════════════════════════════════════════════

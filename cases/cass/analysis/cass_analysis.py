@@ -6,7 +6,7 @@ Provides data loading, analysis functions, and plotting helpers for comparing
 
 Typical usage
 -------------
-    from cass_analysis import RunSet, load_stats_ensemble, load_xy_ensemble
+    from cass_analysis import RunSet, load_stats_ensemble
 
     rs = RunSet("base_debug", "/pscratch/sd/m/mpowell/CASS_LES/debug/base", n_reps=1)
 
@@ -28,7 +28,6 @@ import sys
 import warnings
 import numpy as np
 import xarray as xr
-import netCDF4 as nc
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -50,13 +49,28 @@ cp  = 1005.0   # J kg⁻¹ K⁻¹
 rho = 1.2      # kg m⁻³  reference surface air density
 eps_v = 0.608  # R_v/R_d - 1  (virtual-temperature coefficient)
 
+# ── CASS site constants ─────────────────────────────────────────────────────
+CASS_LAT = 36.5    # ARM SGP latitude [deg N]
+CASS_DOY = 205     # July 24
+
 # ── Simulation time helpers ──────────────────────────────────────────────────
 LST_OFFSET = 5.5   # simulation t=0 → 05:30 LST
+THETA_REF  = 300.0 # reference potential temperature [K]
 
 
 def sim_time_to_lst(t_sec):
     """Convert simulation seconds to LST hours."""
     return np.asarray(t_sec) / 3600.0 + LST_OFFSET
+
+
+def zenith_angle(lst_h, lat=CASS_LAT, doy=CASS_DOY):
+    """Solar zenith angle [deg] for given LST hour(s)."""
+    decl  = np.radians(23.45 * np.sin(np.radians(360.0 / 365.0 * (284 + doy))))
+    lat_r = np.radians(lat)
+    ha    = np.radians(15.0 * (np.asarray(lst_h) - 12.0))
+    cos_z = (np.sin(lat_r) * np.sin(decl)
+             + np.cos(lat_r) * np.cos(decl) * np.cos(ha))
+    return np.degrees(np.arccos(np.clip(cos_z, -1.0, 1.0)))
 
 
 def lst_window_mask(t_sec, lo=11.5, hi=17.0):
@@ -165,32 +179,47 @@ class RunSet:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Stats loading  (netCDF4 — handles groups cleanly)
+# Stats loading  (xarray, one open per group → merge)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def load_stats(run_dir) -> dict:
+def _open_stats_group(path, group):
+    """Open a single netCDF4 group as an xr.Dataset (decode_times=False)."""
+    return xr.open_dataset(str(path), group=group, decode_times=False)
+
+
+def load_stats(run_dir) -> xr.Dataset:
     """Load ``cass.default.0000000.nc`` from *run_dir*.
 
-    Returns a flat dict with arrays from all groups.
+    Returns an xr.Dataset with coordinates (time, t_sec, t_local, z, zh)
+    and data variables from all groups.
 
-    Key entries
-    -----------
-    t_sec, t_local, z, zh             coordinates
-    H, LE, G, S, Rnet                 SEB scalars (W m⁻²)
-    theta                             soil moisture (time, 4 layers)
+    Access pattern is dict-like: ``ds["H"]``, ``ds["qlqi_path"]``, etc.
+
+    Key variables
+    -------------
+    H, LE, G, S, Rnet                 SEB scalars (W m-2)
+    theta                             soil moisture (time, z_soil)
     qlqi_path, qlqi_cover, ql_cover   cloud scalars
     zi                                boundary-layer height (m)
-    thl_w, qt_w, thv_w               resolved turbulent flux profiles at zh
-    thl, qt, ql                       mean profiles at z
+    thl_w, qt_w, thv_w               resolved turbulent flux profiles (time, zh)
+    thl, qt, ql, ql_frac             mean profiles (time, z)
     sza                               solar zenith angle
     """
     run_dir = Path(run_dir)
-    ds = nc.Dataset(str(run_dir / "cass.default.0000000.nc"))
+    stats_path = run_dir / "cass.default.0000000.nc"
 
-    t_sec = ds.variables["time"][:]
-    z  = ds.variables["z"][:]
-    zh = ds.variables["zh"][:]
+    # Read each group as xr.Dataset
+    ds_root = xr.open_dataset(str(stats_path), decode_times=False)
+    ds_lsm  = _open_stats_group(stats_path, "land_surface")
+    ds_rad  = _open_stats_group(stats_path, "radiation")
+    ds_thm  = _open_stats_group(stats_path, "thermo")
+    ds_dyn  = _open_stats_group(stats_path, "default")
 
+    t_sec = ds_root["time"].values
+    z  = ds_root["z"].values
+    zh = ds_root["zh"].values
+
+    # Build local-time coordinate
     start   = get_local_start(run_dir)
     t_local = pd.to_datetime(
         [start + pd.Timedelta(seconds=float(s)) for s in t_sec]
@@ -199,98 +228,79 @@ def load_stats(run_dir) -> dict:
     if hasattr(t_local, "tz") and t_local.tz is not None:
         t_local = t_local.tz_localize(None)
 
-    lsm  = ds.groups["land_surface"]
-    rad  = ds.groups["radiation"]
-    thm  = ds.groups["thermo"]
+    # Radiation scalars: extract surface level
+    sw_dn = ds_rad["sw_flux_dn"].isel(zh=0).values
+    sw_up = ds_rad["sw_flux_up"].isel(zh=0).values
+    lw_dn = ds_rad["lw_flux_dn"].isel(zh=0).values
+    lw_up = ds_rad["lw_flux_up"].isel(zh=0).values
 
-    sw_dn = rad.variables["sw_flux_dn"][:, 0]
-    sw_up = rad.variables["sw_flux_up"][:, 0]
-    lw_dn = rad.variables["lw_flux_dn"][:, 0]
-    lw_up = rad.variables["lw_flux_up"][:, 0]
-
-    out = dict(
-        # Coordinates
-        t_sec   = np.asarray(t_sec),
-        t_local = t_local,
-        z       = np.asarray(z),
-        zh      = np.asarray(zh),
-        # Land surface scalars
-        H       = np.asarray(lsm.variables["H"][:]),
-        LE      = np.asarray(lsm.variables["LE"][:]),
-        G       = np.asarray(lsm.variables["G"][:]),
-        S       = np.asarray(lsm.variables["S"][:]),
-        theta   = np.asarray(lsm.variables["theta"][:]),   # (time, 4)
-        ustar   = np.asarray(lsm.variables["ustar"][:]),
-        # Radiation scalars
-        Rnet    = np.asarray((sw_dn - sw_up) + (lw_dn - lw_up)),
-        sw_dn   = np.asarray(sw_dn),
-        sw_up   = np.asarray(sw_up),
-        lw_dn   = np.asarray(lw_dn),
-        lw_up   = np.asarray(lw_up),
-        sza     = np.asarray(rad.variables["sza"][:]),
-        sw_dn_toa = np.asarray(rad.variables["sw_flux_dn_toa"][:]),
-        # Thermo scalars
-        qlqi_path  = np.asarray(thm.variables["qlqi_path"][:]),
-        ql_cover   = np.asarray(thm.variables["ql_cover"][:]),
-        qlqi_cover = np.asarray(thm.variables["qlqi_cover"][:]),
-        zi         = np.asarray(thm.variables["zi"][:]),
-        thl_bot    = np.asarray(thm.variables["thl_bot"][:]),
-        qt_bot     = np.asarray(thm.variables["qt_bot"][:]),
-        # Thermo profiles at zh — resolved turbulent fluxes
-        thl_w   = np.asarray(thm.variables["thl_w"][:]),   # (time, nzh)
-        qt_w    = np.asarray(thm.variables["qt_w"][:]),
-        thv_w   = np.asarray(thm.variables["thv_w"][:]),
-        # Thermo profiles at z — mean fields
-        thl     = np.asarray(thm.variables["thl"][:]),
-        qt      = np.asarray(thm.variables["qt"][:]),
-        ql      = np.asarray(thm.variables["ql"][:]),
-        ql_frac = np.asarray(thm.variables["ql_frac"][:]),   # (time, nz)
-        # Dynamics profiles at z
-        u       = np.asarray(ds.groups["default"].variables["u"][:]),
-        v       = np.asarray(ds.groups["default"].variables["v"][:]),
-        tke     = np.asarray(ds.groups["default"].variables["tke"][:]),
+    # Assemble into a single Dataset
+    out = xr.Dataset(
+        data_vars={
+            # Land surface scalars (time,)
+            "H":       ("time", ds_lsm["H"].values),
+            "LE":      ("time", ds_lsm["LE"].values),
+            "G":       ("time", ds_lsm["G"].values),
+            "S":       ("time", ds_lsm["S"].values),
+            "theta":   (("time", "z_soil"), ds_lsm["theta"].values),
+            "ustar":   ("time", ds_lsm["ustar"].values),
+            # Radiation scalars (time,)
+            "Rnet":      ("time", (sw_dn - sw_up) + (lw_dn - lw_up)),
+            "sw_dn":     ("time", sw_dn),
+            "sw_up":     ("time", sw_up),
+            "lw_dn":     ("time", lw_dn),
+            "lw_up":     ("time", lw_up),
+            "sza":       ("time", ds_rad["sza"].values),
+            "sw_dn_toa": ("time", ds_rad["sw_flux_dn_toa"].values),
+            # Thermo scalars (time,)
+            "qlqi_path":  ("time", ds_thm["qlqi_path"].values),
+            "ql_cover":   ("time", ds_thm["ql_cover"].values),
+            "qlqi_cover": ("time", ds_thm["qlqi_cover"].values),
+            "zi":         ("time", ds_thm["zi"].values),
+            "thl_bot":    ("time", ds_thm["thl_bot"].values),
+            "qt_bot":     ("time", ds_thm["qt_bot"].values),
+            # Thermo profiles (time, zh)
+            "thl_w": (("time", "zh"), ds_thm["thl_w"].values),
+            "qt_w":  (("time", "zh"), ds_thm["qt_w"].values),
+            "thv_w": (("time", "zh"), ds_thm["thv_w"].values),
+            # Thermo profiles (time, z)
+            "thl":     (("time", "z"), ds_thm["thl"].values),
+            "qt":      (("time", "z"), ds_thm["qt"].values),
+            "ql":      (("time", "z"), ds_thm["ql"].values),
+            "ql_frac": (("time", "z"), ds_thm["ql_frac"].values),
+            # Dynamics profiles (time, z)
+            "u":   (("time", "z"), ds_dyn["u"].values),
+            "v":   (("time", "z"), ds_dyn["v"].values),
+            "tke": (("time", "z"), ds_dyn["tke"].values),
+        },
+        coords={
+            "time":    t_local,
+            "t_sec":   ("time", t_sec),
+            "z":       z,
+            "zh":      zh,
+        },
     )
-    ds.close()
+    # Alias: callers that access ds["t_local"] get the time coordinate values
+    out["t_local"] = out["time"]
+
+    for d in (ds_root, ds_lsm, ds_rad, ds_thm, ds_dyn):
+        d.close()
     return out
 
 
-def load_stats_ensemble(rep_dirs: list) -> tuple[dict, dict]:
+def load_stats_ensemble(rep_dirs: list) -> tuple[xr.Dataset, xr.Dataset]:
     """Load stats from multiple reps; return (ensemble_mean, ensemble_std).
 
     Time axes are truncated to the shortest run before stacking.
     """
-    all_stats = [load_stats(d) for d in rep_dirs]
-    if not all_stats:
+    all_ds = [load_stats(d) for d in rep_dirs]
+    if not all_ds:
         raise ValueError("No rep dirs provided")
 
-    nt_min = min(s["t_sec"].shape[0] for s in all_stats)
-
-    # Spatial coords: copy as-is (never slice along time axis)
-    SPATIAL = {"z", "zh"}
-    # t_local: slice to nt_min but don't stack across reps
-    TIMECOPY = {"t_local"}
-    mean_s, std_s = {}, {}
-
-    for key in all_stats[0]:
-        if key in SPATIAL:
-            mean_s[key] = all_stats[0][key]
-            std_s[key]  = None
-            continue
-        if key in TIMECOPY:
-            mean_s[key] = all_stats[0][key][:nt_min]
-            std_s[key]  = None
-            continue
-        try:
-            arr = np.stack([s[key][:nt_min] for s in all_stats], axis=0)
-            mean_s[key] = arr.mean(axis=0)
-            std_s[key]  = arr.std(axis=0, ddof=0)
-        except Exception:
-            mean_s[key] = all_stats[0][key]
-            std_s[key]  = None
-
-    # Align t_local to nt_min
-    mean_s["t_local"] = all_stats[0]["t_local"][:nt_min]
-    return mean_s, std_s
+    nt_min = min(ds.sizes["time"] for ds in all_ds)
+    all_ds = [ds.isel(time=slice(None, nt_min)) for ds in all_ds]
+    stacked = xr.concat(all_ds, dim="rep")
+    return stacked.mean("rep"), stacked.std("rep", ddof=0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -318,7 +328,10 @@ def load_xy_files(run_dir, variables=None, chunks=None) -> xr.Dataset:
     """
     run_dir = Path(run_dir)
     if variables is None:
-        variables = _XY_VARS_DEFAULT
+        variables = [
+            "qlqi_path", "thl_fluxbot", "qt_fluxbot",
+            "sw_flux_dn", "sw_flux_sfc_dir_rt", "sw_flux_sfc_dif_rt",
+        ]
     if chunks is None:
         chunks = {"time": 200}
 
@@ -356,18 +369,6 @@ def load_xy_files(run_dir, variables=None, chunks=None) -> xr.Dataset:
     return ds
 
 
-def load_xy_ensemble(rep_dirs: list, variables=None,
-                     chunks=None) -> tuple[xr.Dataset, xr.Dataset]:
-    """Load xy files from multiple reps; return (ensemble_mean, ensemble_std).
-
-    Time axes are truncated to the shortest run before computing statistics.
-    """
-    all_ds = [load_xy_files(d, variables, chunks) for d in rep_dirs]
-    nt_min = min(ds.sizes["time"] for ds in all_ds)
-    all_ds = [ds.isel(time=slice(None, nt_min)) for ds in all_ds]
-    stack  = xr.concat(all_ds, dim="rep")
-    return stack.mean("rep"), stack.std("rep")
-
 
 def conditioned_means_ensemble(rep_dirs: list, variables=None) -> tuple[dict, dict]:
     """Compute cloud-root-conditioned surface flux means per rep, return ensemble stats.
@@ -401,9 +402,9 @@ def conditioned_means_ensemble(rep_dirs: list, variables=None) -> tuple[dict, di
         domain_means   = {v: ds[v].mean(["x", "y"])              for v in variables if v in ds}
         per_rep.append({"shaded": shaded_means, "unshaded": unshaded_means, "domain": domain_means})
 
+    first_var = list(per_rep[0]["shaded"])[0]
     nt_min = min(
-        per_rep[0]["shaded"][list(per_rep[0]["shaded"])[0]].sizes["time"]
-        for _ in per_rep
+        r["shaded"][first_var].sizes["time"] for r in per_rep
     )
 
     out_mean = {"shaded": {}, "unshaded": {}, "domain": {}}
@@ -507,25 +508,49 @@ def load_3d_nc(run_dir, variables=None, chunks=None) -> xr.Dataset:
 # SEB helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
-def seb_residual(stats: dict) -> np.ndarray:
+def buoyancy_flux_equiv(thl_flux, qt_flux, theta_ref=THETA_REF):
+    """Equivalent surface buoyancy flux Q_rho = thl_flux + eps_v * Theta * qt_flux.
+
+    Works on scalars, numpy arrays, or xarray DataArrays.
+    """
+    return thl_flux + eps_v * theta_ref * qt_flux
+
+
+def cloud_top_za(z, ql_frac, frac_of_peak=0.10):
+    """Cloud-layer top height from a domain-mean ql_frac profile.
+
+    Returns the highest z where ql_frac > frac_of_peak * max(ql_frac).
+    Returns NaN if no cloud is present.
+    """
+    z = np.asarray(z)
+    ql_frac = np.asarray(ql_frac)
+    peak = ql_frac.max()
+    if peak <= 0:
+        return np.nan
+    above = np.where(ql_frac > frac_of_peak * peak)[0]
+    return float(z[above[-1]])
+
+
+
+def seb_residual(stats) -> np.ndarray:
     """Rnet − (H + LE + G + S)  [W m⁻²]."""
     return stats["Rnet"] - (stats["H"] + stats["LE"] + stats["G"] + stats["S"])
 
 
-def bowen_ratio(stats: dict, le_min: float = 1.0) -> np.ndarray:
+def bowen_ratio(stats, le_min: float = 1.0) -> np.ndarray:
     """H / LE, masked where LE < *le_min*  (avoids near-zero division)."""
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.where(stats["LE"] > le_min, stats["H"] / stats["LE"], np.nan)
 
 
-def evaporative_fraction(stats: dict, le_min: float = 1.0) -> np.ndarray:
+def evaporative_fraction(stats, le_min: float = 1.0) -> np.ndarray:
     """LE / (H + LE), masked where (H + LE) is small."""
     denom = stats["H"] + stats["LE"]
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.where(np.abs(denom) > le_min, stats["LE"] / denom, np.nan)
 
 
-def compute_z_sl(stats: dict, time_idx: int = -1) -> float:
+def compute_z_sl(stats, time_idx: int = -1) -> float:
     """Subcloud-layer height: lowest level where domain-mean ql_frac > 0 (cloud base).
 
     MicroHH's zi diagnostic uses the max thl gradient, which in shallow cumulus
@@ -731,73 +756,6 @@ def compute_normalized_cloud_root_profiles(ds_3d: xr.Dataset,
     }
 
 
-def plot_normalized_cloud_root_profiles(ax_thl, ax_qt,
-                                         result_2s: dict, result_rt: dict) -> None:
-    """Time-mean normalised cloud-root flux profiles ± 1 std, 2stream vs raytracer.
-
-    Parameters
-    ----------
-    ax_thl, ax_qt  : matplotlib Axes (left: heat flux, right: moisture flux)
-    result_2s, result_rt : dicts from compute_normalized_cloud_root_profiles
-    """
-    for rt, res in [("2stream", result_2s), ("raytracer", result_rt)]:
-        sty  = RT_STYLE[rt]
-        zeta = res["zeta"]
-
-        mu_thl = np.nanmean(res["thl_cloud_nd"], axis=0)
-        sd_thl = np.nanstd( res["thl_cloud_nd"], axis=0)
-        mu_qv  = np.nanmean(res["qv_cloud_nd"],  axis=0)
-        sd_qv  = np.nanstd( res["qv_cloud_nd"],  axis=0)
-
-        ax_thl.plot(mu_thl, zeta, label=RT_LABEL[rt], **sty)
-        ax_thl.fill_betweenx(zeta, mu_thl - sd_thl, mu_thl + sd_thl,
-                              alpha=0.15, color=sty["color"])
-        ax_qt.plot(mu_qv, zeta, label=RT_LABEL[rt], **sty)
-        ax_qt.fill_betweenx(zeta, mu_qv - sd_qv, mu_qv + sd_qv,
-                             alpha=0.15, color=sty["color"])
-
-    for ax in (ax_thl, ax_qt):
-        ax.axhline(1.0, color="gray", ls="--", lw=1, label="z_sl")
-        ax.axvline(0,   color="gray", lw=0.5)
-        ax.set_ylim(0, 1.2)
-        ax.set_ylabel("z / z_sl")
-
-    ax_thl.set_xlabel("w'θ_l' (cloud-root) / w'θ_l' (domain mean)  (−)")
-    ax_qt.set_xlabel("w'q_v' (cloud-root) / w'q_v' (domain mean)  (−)")
-    ax_thl.set_title("Normalised cloud-root heat flux")
-    ax_qt.set_title("Normalised cloud-root moisture flux")
-    ax_thl.legend(fontsize=8)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# LWP analysis
-# ══════════════════════════════════════════════════════════════════════════════
-
-def compute_lwp_diff(ds_2s: xr.Dataset, ds_rt: xr.Dataset) -> xr.DataArray:
-    """Domain-mean LWP difference  (3D − 1D)  in g m⁻².
-
-    Time axes are aligned to the shorter run.
-    """
-    lwp_1d = ds_2s["qlqi_path"].mean(["x", "y"]) * 1e3
-    lwp_3d = ds_rt["qlqi_path"].mean(["x", "y"]) * 1e3
-    nt = min(lwp_1d.sizes["time"], lwp_3d.sizes["time"])
-    diff = lwp_3d.isel(time=slice(None, nt)) - lwp_1d.isel(time=slice(None, nt))
-    diff.attrs["units"] = "g m⁻²"
-    diff.attrs["long_name"] = "LWP difference (3D − 1D)"
-    return diff
-
-
-def compute_lwp_diff_from_stats(stats_2s: dict, stats_rt: dict) -> tuple[np.ndarray, np.ndarray]:
-    """Same as compute_lwp_diff but from stats dicts.
-
-    Returns (diff_gm2, t_local) — useful for single-rep debug runs.
-    """
-    nt = min(len(stats_2s["qlqi_path"]), len(stats_rt["qlqi_path"]))
-    diff = (stats_rt["qlqi_path"][:nt] - stats_2s["qlqi_path"][:nt]) * 1e3
-    t    = stats_2s["t_local"][:nt]
-    return diff, t
-
-
 def lwp_integral(diff, dt_s: float, cloudy_mask=None) -> float:
     """Time-integral of LWP difference over the cloudy period.
 
@@ -918,69 +876,6 @@ def plot_flux_conditioned(ax, t_local, shaded_mean, unshaded_mean,
     ax.figure.autofmt_xdate()
     return ax
 
-
-def plot_lwp_comparison(ax,
-                        ds_2s_mean: xr.Dataset, ds_2s_std: xr.Dataset,
-                        ds_rt_mean: xr.Dataset, ds_rt_std: xr.Dataset) -> plt.Axes:
-    """Panel: LWP timeseries for both RT types with ensemble spread."""
-    for rt, ds_m, ds_s in [
-        ("2stream",   ds_2s_mean, ds_2s_std),
-        ("raytracer", ds_rt_mean, ds_rt_std),
-    ]:
-        lwp = ds_m["qlqi_path"].mean(["x", "y"]) * 1e3
-        t   = ds_m.time
-        t_num = _to_plottime(t.values)
-        sty = RT_STYLE[rt]
-        ax.plot(t_num, lwp.values, label=RT_LABEL[rt], **sty)
-        if ds_s is not None and "qlqi_path" in ds_s:
-            lwp_s = ds_s["qlqi_path"].mean(["x", "y"]) * 1e3
-            _shade_ensemble(ax, t.values, lwp.values, lwp_s.values, sty["color"])
-    ax.set_ylabel("LWP  (g m⁻²)")
-    ax.xaxis_date()
-    ax.legend(fontsize=8)
-    ax.figure.autofmt_xdate()
-    return ax
-
-
-def plot_lwp_diff_timeseries(ax, diff_da: xr.DataArray,
-                             integral_val: float = None,
-                             smooth_n: int = 12) -> plt.Axes:
-    """Panel: LWP difference (3D − 1D) with running-mean smoothing."""
-    t     = diff_da.time.values
-    t_num = _to_plottime(t)
-    y     = diff_da.values
-    y_s   = pd.Series(y).rolling(smooth_n, center=True, min_periods=1).mean().values
-    ax.plot(t_num, y,   color="gray", alpha=0.4, lw=0.8, label="instantaneous")
-    ax.plot(t_num, y_s, color="k",    lw=1.5,            label=f"{smooth_n}-pt mean")
-    ax.axhline(0, color="gray", lw=0.5)
-    title = "3D − 1D LWP"
-    if integral_val is not None:
-        title += f"   |   ∫dt = {integral_val:+.1f} g m⁻² h  (cloudy period)"
-    ax.set_title(title, fontsize=9)
-    ax.set_ylabel("ΔLWP  (g m⁻²)")
-    ax.xaxis_date()
-    ax.legend(fontsize=8)
-    ax.figure.autofmt_xdate()
-    return ax
-
-
-def plot_flux_profiles(ax_thl, ax_qt, stats_mean: dict,
-                       rt_type: str = "2stream",
-                       time_idx: int = -1, z_sl: float = None) -> None:
-    """Panels: vertical profiles of resolved w'θ_l' and w'q_t' at one time."""
-    zh  = stats_mean["zh"]
-    sty = RT_STYLE[rt_type]
-    ax_thl.plot(stats_mean["thl_w"][time_idx], zh,
-                label=RT_LABEL[rt_type], **sty)
-    ax_qt.plot(stats_mean["qt_w"][time_idx] * 1e3, zh,
-               label=RT_LABEL[rt_type], **sty)
-    for ax in (ax_thl, ax_qt):
-        ax.axvline(0, color="gray", lw=0.5)
-        if z_sl is not None:
-            ax.axhline(z_sl, color="gray", ls=":", lw=1, label="z_sl")
-    ax_thl.set_xlabel("w'θ_l'  (K m s⁻¹)")
-    ax_qt.set_xlabel("w'q_t'  (g kg⁻¹ m s⁻¹)")
-    ax_thl.set_ylabel("z  (m)")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

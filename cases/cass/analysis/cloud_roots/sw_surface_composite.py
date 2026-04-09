@@ -31,24 +31,15 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-# ── Grid / time constants ──────────────────────────────────────────────────────
-LST_OFFSET = 5.5    # simulation t=0 → 05:30 LST (UTC used directly as LST)
-DT_XY      = 60     # seconds per xy snapshot
+# ── Shared imports from parent analysis package ──────────────────────────────
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from cass_analysis import zenith_angle, CASS_LAT as LAT, CASS_DOY as DOY, LST_OFFSET
 
-# ── Solar geometry ─────────────────────────────────────────────────────────────
-LAT = 36.5          # ARM SGP latitude [°N]
-DOY = 205           # July 24
+# ── Grid / time constants ──────────────────────────────────────────────────────
+DT_XY = 60     # seconds per xy snapshot
 
 # ── Equal-zenith-angle windows ────────────────────────────────────────────────
-
-def zenith_angle(lst_h, lat=LAT, doy=DOY):
-    """Solar zenith angle [deg] for given LST hour(s)."""
-    decl  = np.radians(23.45 * np.sin(np.radians(360.0 / 365.0 * (284 + doy))))
-    lat_r = np.radians(lat)
-    ha    = np.radians(15.0 * (np.asarray(lst_h) - 12.0))
-    cos_z = (np.sin(lat_r) * np.sin(decl)
-             + np.cos(lat_r) * np.cos(decl) * np.cos(ha))
-    return np.degrees(np.arccos(np.clip(cos_z, -1.0, 1.0)))
 
 
 def compute_equal_zenith_windows(lat=LAT, doy=DOY,
