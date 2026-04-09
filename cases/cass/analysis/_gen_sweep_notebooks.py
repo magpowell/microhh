@@ -43,7 +43,6 @@ def nb(cells):
 IMPORTS = """\
 import os, sys, pickle, warnings
 import numpy as np
-import netCDF4 as nc
 import xarray as xr
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -61,14 +60,13 @@ from cass_analysis import (
     eps_v, LST_OFFSET, sim_time_to_lst, lst_window_mask,
     load_sfc_xy, load_sfc_sw_dn,
 )
-from catalog import make_runset, list_group, ALL_EXPERIMENTS
+from catalog import make_runset, list_group, CASS_ROOT, ALL_EXPERIMENTS
 """
 
 
 def config_cell(group, title, sweep_filter="", param_unit="", extra_note=""):
     lines = [
-        f'SCRATCH        = Path("/pscratch/sd/m/mpowell/CASS_LES")\n',
-        f'COMPOSITE_ROOT = SCRATCH / "analysis/cloud_root_composite"\n',
+        f'COMPOSITE_ROOT = CASS_ROOT / "analysis/cloud_root_composite"\n',
         f'N_REPS         = 4\n',
         f'LST_OFF        = LST_OFFSET   # from cass_analysis (5.5 h)\n',
         f'LST_MIN_H, LST_MAX_H = 12.5, 19.0\n',
@@ -90,8 +88,9 @@ def config_cell(group, title, sweep_filter="", param_unit="", extra_note=""):
         f'PARAMS  = {{key: meta["param"]  for key, meta in sweep}}\n',
         f'\n',
         f'def lst_mask(s, lo=LST_MIN_H, hi=LST_MAX_H):\n',
-        f'    t_local = s["t_local"] if isinstance(s, dict) else s\n',
-        f'    hours = np.array([t.hour + t.minute / 60 for t in t_local])\n',
+        f'    t_local = s["t_local"].values if hasattr(s, "data_vars") else (s["t_local"] if isinstance(s, dict) else s)\n',
+        f'    import pandas as _pd\n',
+        f'    hours = _pd.DatetimeIndex(t_local).hour + _pd.DatetimeIndex(t_local).minute / 60\n',
         f'    return (hours >= lo) & (hours <= hi)\n',
         f'\n',
         f'def axvspan_window(ax, t_local, mask, **kwargs):\n',
@@ -138,17 +137,17 @@ for key, meta in sweep:
                               if dirs_rt else (None, None))
 
     # ── LWP per-rep (for σ across reps) ────────────────────────────────────
-    nt_lwp  = min(s["qlqi_path"].shape[0] for s in reps_2s)
+    nt_lwp  = min(s["qlqi_path"].sizes["time"] for s in reps_2s)
     if reps_rt:
-        nt_lwp = min(nt_lwp, *(s["qlqi_path"].shape[0] for s in reps_rt))
+        nt_lwp = min(nt_lwp, *(s["qlqi_path"].sizes["time"] for s in reps_rt))
     n_paired = min(len(reps_2s), len(reps_rt)) if reps_rt else len(reps_2s)
 
-    lwp_1d_reps = np.stack([s["qlqi_path"][:nt_lwp] * 1e3 for s in reps_2s[:n_paired]])
+    lwp_1d_reps = np.stack([s["qlqi_path"].values[:nt_lwp] * 1e3 for s in reps_2s[:n_paired]])
     lwp_1d      = lwp_1d_reps.mean(axis=0)
     lwp_1d_std  = lwp_1d_reps.std(axis=0)
 
     if reps_rt:
-        lwp_rt_reps = np.stack([s["qlqi_path"][:nt_lwp] * 1e3 for s in reps_rt[:n_paired]])
+        lwp_rt_reps = np.stack([s["qlqi_path"].values[:nt_lwp] * 1e3 for s in reps_rt[:n_paired]])
         lwp_rt      = lwp_rt_reps.mean(axis=0)
         lwp_rt_std  = lwp_rt_reps.std(axis=0)
         diff_reps   = lwp_rt_reps - lwp_1d_reps
@@ -157,8 +156,8 @@ for key, meta in sweep:
     else:
         lwp_rt = lwp_rt_std = diff = diff_std = diff_reps = None
 
-    t_local_lwp = reps_2s[0]["t_local"][:nt_lwp]
-    t_sec_lwp   = reps_2s[0]["t_sec"][:nt_lwp]
+    t_local_lwp = reps_2s[0]["t_local"].values[:nt_lwp]
+    t_sec_lwp   = reps_2s[0]["t_sec"].values[:nt_lwp]
     dt_s        = float(t_sec_lwp[1] - t_sec_lwp[0]) if len(t_sec_lwp) > 1 else 60.0
     t_num_lwp   = _to_plottime(t_local_lwp)
 
@@ -287,21 +286,15 @@ for key in available:
     for rt_key, rep_list in [("2stream", d["reps_2s"]), ("raytracer", d["reps_rt"])]:
         if not rep_list:
             continue
-        dirs_ = d[f"dirs_{rt_key[:2].replace('ra','rt')}"] if rt_key == "raytracer" else d["dirs_2s"]
-        # reload thermo directly
         _reps_t = []
-        for _d in (d["dirs_rt"] if rt_key == "raytracer" else d["dirs_2s"]):
-            ds = nc.Dataset(str(Path(_d) / "cass.default.0000000.nc"))
-            thm = ds.groups["thermo"]
-            _t  = np.array(ds.variables["time"][:])
-            _z  = np.array(ds.variables["z"][:])
+        for _s in (d["reps_rt"] if rt_key == "raytracer" else d["reps_2s"]):
             _reps_t.append({
-                "t": _t, "z": _z,
-                "ql": np.array(thm.variables["ql"][:]) * 1e3,
-                "thl": np.array(thm.variables["thl"][:]),
-                "qt":  np.array(thm.variables["qt"][:]) * 1e3,
+                "t": _s["t_sec"].values,
+                "z": _s.coords["z"].values,
+                "ql": _s["ql"].values * 1e3,
+                "thl": _s["thl"].values,
+                "qt":  _s["qt"].values * 1e3,
             })
-            ds.close()
         if not _reps_t:
             continue
         nt_ = min(r["t"].shape[0] for r in _reps_t)
@@ -403,9 +396,8 @@ for key in available:
         for rt_key, sm in [("2stream", d["s2s_mean"]), ("raytracer", d["srt_mean"])]:
             if sm is None:
                 continue
-            nt_ = sm["t_sec"].shape[0]
-            t_  = _to_plottime(sm["t_local"][:nt_])
-            ax.plot(t_, sm[flux][:nt_],
+            t_  = _to_plottime(sm["t_local"].values)
+            ax.plot(t_, sm[flux].values,
                     color=c, ls="-" if rt_key == "2stream" else "--", lw=1.2)
         ax.set_ylabel(f"{flux_labels[flux]}  (W m⁻²)")
         ax.xaxis_date()
@@ -437,20 +429,19 @@ for key in available:
     for rt_key, sm in [("2stream", d["s2s_mean"]), ("raytracer", d["srt_mean"])]:
         if sm is None:
             continue
-        nt_ = sm["t_sec"].shape[0]
-        t_  = _to_plottime(sm["t_local"][:nt_])
-        ef  = evaporative_fraction({k: sm[k][:nt_] for k in sm})
-        day = sm["Rnet"][:nt_] > 50
-        ax_ef.plot(t_[day], ef[day], color=c,
+        t_  = _to_plottime(sm["t_local"].values)
+        ef  = evaporative_fraction(sm)
+        day = sm["Rnet"].values > 50
+        ax_ef.plot(t_[day], np.asarray(ef)[day], color=c,
                    ls="-" if rt_key == "2stream" else "--", lw=1.2)
-        res = seb_residual({k: sm[k][:nt_] for k in sm})
-        ax_res.plot(t_, res, color=c,
+        res = seb_residual(sm)
+        ax_res.plot(t_, np.asarray(res), color=c,
                     ls="-" if rt_key == "2stream" else "--", lw=1.2)
         if day.any():
             if rt_key == "2stream":
-                ef_1d_vals.append((PARAMS[key], np.nanmean(ef[day])))
+                ef_1d_vals.append((PARAMS[key], float(np.nanmean(np.asarray(ef)[day]))))
             else:
-                ef_3d_vals.append((PARAMS[key], np.nanmean(ef[day])))
+                ef_3d_vals.append((PARAMS[key], float(np.nanmean(np.asarray(ef)[day]))))
 
 ax_ef.set_ylabel("EF  (–)")
 ax_ef.set_title("Evaporative fraction  (daytime)")
@@ -526,13 +517,21 @@ def _method_flux_jump(s):
 
 
 def _load_ext(run_dir):
-    s = load_stats(run_dir)
-    ds = nc.Dataset(str(Path(run_dir) / "cass.default.0000000.nc"))
-    thm = ds.groups["thermo"]
-    s["thv"]      = np.array(thm.variables["thv"][:])
-    s["thv_flux"] = np.array(thm.variables["thv_flux"][:])
-    s["zh"]       = np.array(ds.variables["zh"][:])
-    ds.close()
+    \"\"\"Load stats + thv/thv_flux (not in standard load_stats) as a plain dict.\"\"\"
+    ds_stats = load_stats(run_dir)
+    # Convert xr.Dataset to plain dict of numpy arrays for entrainment code
+    s = {k: ds_stats[k].values for k in ds_stats.data_vars}
+    s["z"]  = ds_stats.coords["z"].values
+    s["zh"] = ds_stats.coords["zh"].values
+    s["t_sec"] = ds_stats["t_sec"].values
+    s["t_local"] = ds_stats["t_local"].values
+    # Add thv and thv_flux (not in load_stats)
+    import xarray as _xr
+    _path = str(Path(run_dir) / "cass.default.0000000.nc")
+    _ds_thm = _xr.open_dataset(_path, group="thermo", decode_times=False)
+    s["thv"]      = _ds_thm["thv"].values
+    s["thv_flux"] = _ds_thm["thv_flux"].values
+    _ds_thm.close()
     return s
 
 
@@ -667,7 +666,7 @@ for _key in {sweep_keys_expr}:
         if not _dirs:
             continue
         _run_root  = str(_dirs[0].parent)   # .../subdir/2stream  (parent of rep_XX)
-        _comp_expt = str(Path(_run_root).parent.relative_to(SCRATCH / "experiments"))
+        _comp_expt = str(Path(_run_root).parent.relative_to(CASS_ROOT / "experiments"))
         CASES_CR.append(dict(
             key=f"{{_key}}/{{_rt}}",
             label=_meta["label"] + (" 1D" if _rt == "2stream" else " 3D"),

@@ -33,8 +33,8 @@ References:
 
 Usage:
     python cloud_root_composite_prep.py \\
-        --run-dir /pscratch/sd/m/mpowell/CASS_LES/base/2stream/rep_01 \\
-        --output-dir /pscratch/sd/m/mpowell/CASS_LES/analysis/cloud_root_composite/base/2stream/rep_01
+        --run-dir $SCRATCH/CASS_LES/base/2stream/rep_01 \\
+        --output-dir $SCRATCH/CASS_LES/analysis/cloud_root_composite/base/2stream/rep_01
 """
 
 import argparse
@@ -59,8 +59,8 @@ from cass_analysis import (
 )
 
 # ── Tunable parameters ────────────────────────────────────────────────────────
-LST_MIN_H   = 11.5    # start of compositing window [hours past midnight, local time]
-LST_MAX_H   = 17.0    # end   of compositing window
+LST_MIN_H   = 11.5    # start of compositing window [LST hours]; matches cass_analysis.lst_window_mask defaults
+LST_MAX_H   = 17.0    # end   of compositing window [LST hours]
 MIN_CHORD_M = 1000.0  # minimum chord length in the slice direction [m]
 PREFILTER_L =  500.0  # effective-diameter pre-filter for find_cloud_objects [m]
                       # (objects smaller than this can't have chord >= MIN_CHORD_M)

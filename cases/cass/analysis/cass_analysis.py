@@ -58,6 +58,12 @@ LST_OFFSET = 5.5   # simulation t=0 → 05:30 LST
 THETA_REF  = 300.0 # reference potential temperature [K]
 
 
+def dump_t_to_lst(dump_t_ns):
+    """Convert float64 ns-epoch timestamp to LST hour (scalar)."""
+    ts = pd.Timestamp(int(dump_t_ns), unit='ns')
+    return ts.hour + ts.minute / 60.0 + ts.second / 3600.0
+
+
 def sim_time_to_lst(t_sec):
     """Convert simulation seconds to LST hours."""
     return np.asarray(t_sec) / 3600.0 + LST_OFFSET
@@ -280,8 +286,8 @@ def load_stats(run_dir) -> xr.Dataset:
             "zh":      zh,
         },
     )
-    # Alias: callers that access ds["t_local"] get the time coordinate values
-    out["t_local"] = out["time"]
+    # Alias: callers that access ds["t_local"] get the local-time values
+    out["t_local"] = ("time", t_local)
 
     for d in (ds_root, ds_lsm, ds_rad, ds_thm, ds_dyn):
         d.close()
@@ -299,8 +305,29 @@ def load_stats_ensemble(rep_dirs: list) -> tuple[xr.Dataset, xr.Dataset]:
 
     nt_min = min(ds.sizes["time"] for ds in all_ds)
     all_ds = [ds.isel(time=slice(None, nt_min)) for ds in all_ds]
-    stacked = xr.concat(all_ds, dim="rep")
-    return stacked.mean("rep"), stacked.std("rep", ddof=0)
+
+    # Save datetime coords before replacing with integer index for safe concat
+    t_local = all_ds[0]["t_local"]
+    t_sec   = all_ds[0]["t_sec"]
+    t_coord = all_ds[0].coords["time"]
+
+    # Replace time coord with integer index; drop t_local (datetime, can't average)
+    prepped = []
+    for ds in all_ds:
+        ds = ds.drop_vars("t_local").assign_coords(time=np.arange(nt_min))
+        prepped.append(ds)
+
+    stacked = xr.concat(prepped, dim="rep")
+    mean_ds = stacked.mean("rep")
+    std_ds  = stacked.std("rep", ddof=0)
+
+    # Restore datetime coords
+    mean_ds = mean_ds.assign_coords(time=t_coord.values)
+    std_ds  = std_ds.assign_coords(time=t_coord.values)
+    mean_ds["t_local"] = t_local
+    std_ds["t_local"]  = t_local
+
+    return mean_ds, std_ds
 
 
 # ══════════════════════════════════════════════════════════════════════════════

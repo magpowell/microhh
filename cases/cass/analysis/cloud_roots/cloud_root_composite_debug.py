@@ -14,6 +14,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
@@ -36,7 +37,7 @@ from cloud_root_composite_prep import (
     LST_MIN_H, LST_MAX_H, MIN_CHORD_M, PREFILTER_L, FIELDS_3D,
 )
 
-SCRATCH = Path("/pscratch/sd/m/mpowell/CASS_LES")
+SCRATCH = Path(os.environ.get("SCRATCH", "/pscratch/sd/m/mpowell")) / "CASS_LES"
 DEBUG_ROOT = SCRATCH / "debug" / "no_aerosols"
 
 OUTPUT_DIR = SCRATCH / "analysis" / "cloud_root_composite" / "debug" / "no_aerosols"
@@ -123,6 +124,8 @@ def main():
 
             evt: dict = {}
             for name, arr in zip(COMPOSITE_VARS, fields):
+                if arr is None:
+                    continue
                 evt[name] = interp_event_to_std_grid(arr, x_nd, z_nd)
 
             evt["L_m"]    = float(chord)

@@ -26,7 +26,7 @@ Usage:
     python cloud_root_composite_average.py \\
         --expt base \\
         --rt   2stream \\
-        --composite-dir /pscratch/sd/m/mpowell/CASS_LES/analysis/cloud_root_composite
+        --composite-dir $SCRATCH/CASS_LES/analysis/cloud_root_composite
 """
 
 import argparse
@@ -145,7 +145,7 @@ def average_reps_windowed(composite_dir: Path, expt: str, rt: str,
     -------
     dict  {window_index: {'xz': xr.Dataset, 'yz': xr.Dataset, 'label': str}}
     """
-    from sw_surface_composite import dump_t_to_lst
+    from cass_analysis import dump_t_to_lst
 
     base_dir = composite_dir / expt / rt
     n_win = len(windows)
@@ -242,13 +242,103 @@ def average_reps_windowed(composite_dir: Path, expt: str, rt: str,
     return results
 
 
+def average_reps_azimuth(composite_dir: Path, expt: str, rt: str,
+                         windows: list[tuple[float, float]],
+                         window_labels: list[str],
+                         n_reps: int = 4,
+                         verbose: bool = True) -> dict[int, dict]:
+    """Azimuth-rotated composites: blend windowed xz/yz means using solar azimuth.
+
+    Uses ``average_reps_windowed`` to get per-window means for xz and yz
+    independently, then blends them using the window's midpoint solar azimuth:
+        parallel      = sin²(φ)·xz_mean + cos²(φ)·yz_mean
+        perpendicular = cos²(φ)·xz_mean + sin²(φ)·yz_mean
+
+    Returns
+    -------
+    dict  {window_index: {'parallel': xr.Dataset, 'perpendicular': xr.Dataset,
+                          'label': str, 'azimuth_stats': dict}}
+    """
+    from sw_surface_composite import solar_angles
+
+    # Get windowed xz/yz composites (already averaged across reps)
+    windowed = average_reps_windowed(
+        composite_dir, expt, rt,
+        windows=windows, window_labels=window_labels,
+        n_reps=n_reps, verbose=verbose,
+    )
+
+    results = {}
+    for wi, wi_data in windowed.items():
+        ds_xz = wi_data.get("xz")
+        ds_yz = wi_data.get("yz")
+        if ds_xz is None or ds_yz is None:
+            if verbose:
+                print(f"  win {wi}: missing xz or yz — skipping azimuth blend")
+            continue
+
+        # Solar azimuth at window midpoint
+        lo, hi = windows[wi]
+        lst_mid = (lo + hi) / 2
+        _, az_mid = solar_angles(lst_mid)  # (elevation, azimuth) in degrees
+        sp2 = np.sin(np.radians(az_mid))**2
+        cp2 = np.cos(np.radians(az_mid))**2
+
+        if verbose:
+            print(f"  win {wi} ({window_labels[wi]}): "
+                  f"φ_az={az_mid:.0f}° (LST midpoint={lst_mid:.2f}h)")
+
+        # Blend each variable
+        par_vars, perp_vars = {}, {}
+        for vn_base in COMPOSITE_VARS:
+            for suffix in ("_mean", "_std", "_sem"):
+                vn = f"{vn_base}{suffix}"
+                if vn not in ds_xz or vn not in ds_yz:
+                    continue
+                xz_arr = ds_xz[vn].values
+                yz_arr = ds_yz[vn].values
+                par_vars[vn]  = xr.DataArray(sp2 * xz_arr + cp2 * yz_arr, dims=["z_nd", "xL"])
+                perp_vars[vn] = xr.DataArray(cp2 * xz_arr + sp2 * yz_arr, dims=["z_nd", "xL"])
+
+        # Copy event counts from xz (representative)
+        if "n_events_per_rep" in ds_xz:
+            par_vars["n_events_per_rep"] = ds_xz["n_events_per_rep"]
+            perp_vars["n_events_per_rep"] = ds_xz["n_events_per_rep"]
+
+        coords = {
+            "xL":   ("xL",   XL_GRID,  {"long_name": "r/L"}),
+            "z_nd": ("z_nd", ZND_GRID, {"long_name": "z/z_sl"}),
+        }
+
+        # Azimuth stats (window-level, not per-event)
+        # Use endpoints of the window for range
+        _, az_lo = solar_angles(lo)
+        _, az_hi = solar_angles(hi)
+        n_total = int(ds_xz["n_events_per_rep"].values.sum()) if "n_events_per_rep" in ds_xz else 0
+
+        results[wi] = {
+            "parallel":      xr.Dataset(par_vars,  coords=coords),
+            "perpendicular": xr.Dataset(perp_vars, coords=coords),
+            "label":         window_labels[wi],
+            "azimuth_stats": dict(
+                mean=float(az_mid),
+                std=float(abs(az_hi - az_lo) / 2),
+                min=float(min(az_lo, az_hi)),
+                max=float(max(az_lo, az_hi)),
+                n=n_total,
+            ),
+        }
+
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--expt",          required=True,
-                        help="Experiment name (e.g. 'base', 'cs_veg/cs_veg_42000')")
+                        help="Experiment name (e.g. 'base', 'no_aerosols_zero_wind')")
     parser.add_argument("--rt",            required=True,
                         help="Radiation type: '2stream' or 'raytracer'")
     parser.add_argument("--composite-dir", required=True,

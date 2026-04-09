@@ -34,7 +34,7 @@ import xarray as xr
 # ── Shared imports from parent analysis package ──────────────────────────────
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from cass_analysis import zenith_angle, CASS_LAT as LAT, CASS_DOY as DOY, LST_OFFSET
+from cass_analysis import zenith_angle, CASS_LAT as LAT, CASS_DOY as DOY, LST_OFFSET, XL_GRID, dump_t_to_lst
 
 # ── Grid / time constants ──────────────────────────────────────────────────────
 DT_XY = 60     # seconds per xy snapshot
@@ -76,8 +76,7 @@ def compute_equal_zenith_windows(lat=LAT, doy=DOY,
 WINDOWS, WINDOW_LABELS = compute_equal_zenith_windows()
 N_WIN = len(WINDOWS)
 
-# Standard chord-normalised grid — must match XL_GRID in cass_analysis.py
-XL_GRID = np.linspace(-1.0, 1.0, 200)
+# XL_GRID imported from cass_analysis
 
 
 # ── Solar geometry helpers ─────────────────────────────────────────────────────
@@ -107,14 +106,7 @@ def solar_angles(lst_h, lat=LAT, doy=DOY):
 
 # ── Time-matching helpers ──────────────────────────────────────────────────────
 
-def dump_t_to_lst(dump_t_ns):
-    """float64 ns-epoch → LST hour.
-
-    The simulation wall clock is UTC; LST = UTC hour (no tz offset applied —
-    confirmed by matching dump_t to thl.nc sim-second timestamps).
-    """
-    ts = pd.Timestamp(int(dump_t_ns), unit='ns')
-    return ts.hour + ts.minute / 60.0 + ts.second / 3600.0
+# dump_t_to_lst imported from cass_analysis
 
 
 def dump_t_to_xy_tidx(dump_t_ns, dt=DT_XY):

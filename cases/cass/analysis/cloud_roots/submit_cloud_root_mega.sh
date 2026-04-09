@@ -67,37 +67,8 @@ add_group "$LES_ROOT/experiments/no_aerosols/raytracer" "$COMPOSITE_ROOT/no_aero
 add_group "$LES_ROOT/experiments/no_aerosols_zero_wind/2stream"   "$COMPOSITE_ROOT/no_aerosols_zero_wind/2stream"
 add_group "$LES_ROOT/experiments/no_aerosols_zero_wind/raytracer" "$COMPOSITE_ROOT/no_aerosols_zero_wind/raytracer"
 
-# ── cs_veg (3 lowest values; two highest suppress clouds) ────────────────────
-for val in cs_veg_0 cs_veg_41840 cs_veg_418400; do
-    add_group "$LES_ROOT/experiments/cs_veg/$val/2stream"   "$COMPOSITE_ROOT/cs_veg/$val/2stream"
-    add_group "$LES_ROOT/experiments/cs_veg/$val/raytracer" "$COMPOSITE_ROOT/cs_veg/$val/raytracer"
-done
-
-# ── soil_moisture ─────────────────────────────────────────────────────────────
-# Enumerate whatever theta_* dirs exist — handles 0p1, 0p155, 0p17, 0p185, etc.
-for val_path in "$LES_ROOT/experiments/soil_moisture/theta_"*/; do
-    [[ -d "$val_path" ]] || continue
-    val="$(basename "$val_path")"
-    add_group "$LES_ROOT/experiments/soil_moisture/$val/2stream"   "$COMPOSITE_ROOT/soil_moisture/$val/2stream"
-    add_group "$LES_ROOT/experiments/soil_moisture/$val/raytracer" "$COMPOSITE_ROOT/soil_moisture/$val/raytracer"
-done
-
-# ── mean_state_nudge (raytracer only) ─────────────────────────────────────────
-add_group "$LES_ROOT/experiments/mean_state_nudge/nudge_3600s/raytracer" \
-          "$COMPOSITE_ROOT/mean_state_nudge/nudge_3600s/raytracer"
-
-# ── wind_u ────────────────────────────────────────────────────────────────────
-for val in u_0p0 u_2p5 u_5p0 u_7p5; do
-    add_group "$LES_ROOT/experiments/wind_u/$val/2stream"   "$COMPOSITE_ROOT/wind_u/$val/2stream"
-    add_group "$LES_ROOT/experiments/wind_u/$val/raytracer" "$COMPOSITE_ROOT/wind_u/$val/raytracer"
-done
-# u_10p0 2stream always; raytracer conditional on run completion
-add_group "$LES_ROOT/experiments/wind_u/u_10p0/2stream" "$COMPOSITE_ROOT/wind_u/u_10p0/2stream"
-if [[ -f "$LES_ROOT/experiments/wind_u/u_10p0/raytracer/rep_01/cass.default.0000000.nc" ]]; then
-    add_group "$LES_ROOT/experiments/wind_u/u_10p0/raytracer" "$COMPOSITE_ROOT/wind_u/u_10p0/raytracer"
-else
-    echo "NOTE: wind_u/u_10p0/raytracer not yet complete — skipped."
-fi
+# Archived experiments (cs_veg, soil_moisture, mean_state_nudge, wind_u) removed 2026-04-08.
+# Add new experiments (rs_scale, sw_scale, wind_geo) here when production runs complete.
 
 N_REPS=${#RUN_DIRS[@]}
 echo "Total reps to process: $N_REPS"
