@@ -1,9 +1,16 @@
-"""Generate cs_veg_comparison.ipynb, soil_moisture_comparison.ipynb, wind_u_comparison.ipynb."""
+"""Generate cs_veg_comparison.ipynb, soil_moisture_comparison.ipynb, wind_u_comparison.ipynb, wind_geo_comparison.ipynb.
+
+Usage: python _gen_sweep_notebooks.py [group1 group2 ...]
+If no groups given, regenerates all four. Valid groups: cs_veg, soil_moisture, wind_u, wind_geo.
+"""
 
 import json
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).parent
+_ALL_GROUPS = ("cs_veg", "soil_moisture", "wind_u", "wind_geo")
+_TARGETS = set(sys.argv[1:]) if len(sys.argv) > 1 else set(_ALL_GROUPS)
 
 
 # ── Notebook building helpers ─────────────────────────────────────────────────
@@ -51,14 +58,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd()))
 from cass_analysis import (
-    load_stats, load_stats_ensemble, load_3d_nc, load_xy_files,
-    compute_normalized_cloud_root_profiles,
-    lwp_integral, lwp_normalized_diff,
-    seb_residual, evaporative_fraction,
+    load_stats, load_stats_ensemble,
+    lwp_integral,
     RunSet, _to_plottime,
     rho, cp, Lv,
-    eps_v, LST_OFFSET, sim_time_to_lst, lst_window_mask,
-    load_sfc_xy, load_sfc_sw_dn,
+    LST_OFFSET,
 )
 from catalog import make_runset, list_group, CASS_ROOT, ALL_EXPERIMENTS
 """
@@ -192,43 +196,11 @@ available = [k for k in data]
 print(f"\\nLoaded {len(available)} sweep values: {available}")
 """
 
-LWP_SECTION = """\
-# ── LWP timeseries: absolute ──────────────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(11, 3.5))
-
-for key in available:
-    d = data[key]
-    c = COLORS[key]
-    ax.plot(d["t_num_lwp"], d["lwp_1d"], color=c, ls="-",  lw=1.5)
-    ax.fill_between(d["t_num_lwp"],
-                    d["lwp_1d"] - d["lwp_1d_std"],
-                    d["lwp_1d"] + d["lwp_1d_std"], color=c, alpha=0.10)
-    if d["lwp_rt"] is not None:
-        ax.plot(d["t_num_lwp"], d["lwp_rt"], color=c, ls="--", lw=1.5)
-        ax.fill_between(d["t_num_lwp"],
-                        d["lwp_rt"] - d["lwp_rt_std"],
-                        d["lwp_rt"] + d["lwp_rt_std"], color=c, alpha=0.10)
-
-ax.axhline(0, color="gray", lw=0.5)
-ax.set_ylabel(r"LWP  (g m$^{-2}$)", fontsize=9)
-_lh_c = [Line2D([0],[0], color=COLORS[k], lw=2, label=LABELS[k]) for k in available]
-_lh_s = [Line2D([0],[0], color="k", ls="-",  lw=1.5, label="1D"),
-          Line2D([0],[0], color="k", ls="--", lw=1.5, label="3D")]
-ax.legend(handles=_lh_c + _lh_s, fontsize=7, ncol=2) #  + _lh_w
-ax.xaxis_date()
-fig.autofmt_xdate()
-fig.suptitle(f"{SWEEP_GROUP} sweep:  Domain-mean LWP  (ensemble mean ±1σ)", fontsize=12)
-plt.tight_layout()
-_savefig(f"{SWEEP_GROUP}_lwp_timeseries.pdf", bbox_inches="tight")
-plt.show()
-"""
-
-LWP_INTEGRAL_BAR = """\
-# ── LWP summary: diff / normalised / integral ────────────────────────────────
+LWP_SUMMARY = """\
+# ── LWP summary: mean difference + cloudy-period integral ────────────────────
 keys_d = [k for k in available if data[k]["diff"] is not None]
 
-fig, axes = plt.subplots(1, 3, figsize=(16, 4))
-ax_diff, ax_norm, ax_int = axes
+fig, (ax_diff, ax_int) = plt.subplots(1, 2, figsize=(12, 4))
 
 for key in keys_d:
     d   = data[key]
@@ -238,21 +210,12 @@ for key in keys_d:
     ax_diff.fill_between(d["t_num_lwp"],
                          d["diff"] - d["diff_std"],
                          d["diff"] + d["diff_std"], color=c, alpha=0.15)
-    norm     = d["diff"]     / np.maximum(d["lwp_1d"], 0.1) * 100
-    norm_std = d["diff_std"] / np.maximum(d["lwp_1d"], 0.1) * 100
-    ax_norm.plot(d["t_num_lwp"], norm, color=c, lw=1.5)
-    ax_norm.fill_between(d["t_num_lwp"], norm - norm_std, norm + norm_std, color=c, alpha=0.15)
 
 ax_diff.axhline(0, color="gray", lw=0.7, ls="--")
 ax_diff.set_ylabel(r"3D − 1D LWP  (g m$^{-2}$)", fontsize=9)
 ax_diff.set_title("(a) Mean difference")
 ax_diff.legend(fontsize=8)
 ax_diff.xaxis_date()
-
-ax_norm.axhline(0, color="gray", lw=0.7, ls="--")
-ax_norm.set_ylabel("(3D − 1D) / 1D  (%)", fontsize=9)
-ax_norm.set_title("(b) Normalised difference")
-ax_norm.xaxis_date()
 
 norm_ints = [data[k]["norm_int"] for k in keys_d]
 norm_stds = [data[k]["norm_int_std"] for k in keys_d]
@@ -265,10 +228,9 @@ ax_int.set_xticks(x)
 ax_int.set_xticklabels([LABELS[k] for k in keys_d], rotation=15, ha="right", fontsize=9)
 ax_int.set_xlabel(f"{SWEEP_GROUP}  ({PARAM_UNIT})")
 ax_int.set_ylabel(r"$\int$(3D $-$ 1D) / $\int$(1D)  (%)", fontsize=9)
-ax_int.set_title("(c) Normalised cloudy-period integral")
+ax_int.set_title("(b) Normalised cloudy-period integral")
 
-for ax in [ax_diff, ax_norm]:
-    ax.figure.autofmt_xdate()
+ax_diff.figure.autofmt_xdate()
 
 fig.suptitle(f"{SWEEP_GROUP} sweep: 3D − 1D LWP  (ensemble mean ±1σ)", fontsize=12)
 plt.tight_layout()
@@ -304,36 +266,63 @@ for key in available:
         reps.append((rt_key, avg))
     thermo[key] = reps
 
-# Plot ql time-height for each param, raytracer only (best available)
+# 3 rows: 3D (raytracer), 1D (2stream), 3D − 1D diff.
+# Shared abs scale for rows 0–1; symmetric diff scale for row 2.
 n_vals = len(available)
-fig, axes = plt.subplots(1, n_vals, figsize=(4.5 * n_vals, 4.5), sharey=True)
-if n_vals == 1:
-    axes = [axes]
+fig, axes = plt.subplots(3, n_vals, figsize=(4.0 * n_vals, 10),
+                         sharey=True, sharex=True, squeeze=False)
 z_max = 4000
 
-for ax, key in zip(axes, available):
-    ql_data = None
+panels = []  # (col, key, t_h, z, ql_3d, ql_1d, diff) or None for missing
+for col, key in enumerate(available):
+    d_2s = d_rt = None
     for rt_key, avg in thermo[key]:
-        if rt_key == "raytracer":
-            ql_data = avg
-            break
-    if ql_data is None and thermo[key]:
-        _, ql_data = thermo[key][0]  # fall back to 2stream
-    if ql_data is None:
-        ax.set_title(LABELS[key]); continue
+        if rt_key == "2stream":
+            d_2s = avg
+        elif rt_key == "raytracer":
+            d_rt = avg
+    if d_2s is None or d_rt is None:
+        panels.append(None); continue
+    z    = d_2s["z"]
+    zmsk = z <= z_max
+    nt   = min(d_2s["ql"].shape[0], d_rt["ql"].shape[0])
+    ql_3 = d_rt["ql"][:nt, zmsk]
+    ql_1 = d_2s["ql"][:nt, zmsk]
+    t_h  = d_rt["t"][:nt] / 3600 + LST_OFF
+    panels.append((col, key, t_h, z[zmsk], ql_3, ql_1, ql_3 - ql_1))
 
-    z = ql_data["z"]
-    z_mask = z <= z_max
-    t_h = ql_data["t"] / 3600 + LST_OFF
-    ql  = ql_data["ql"][:, z_mask]
-    vmax = max(np.nanpercentile(ql[ql > 0], 99) if (ql > 0).any() else 0.01, 0.01)
-    ax.pcolormesh(t_h, z[z_mask], ql.T, cmap="Blues", vmin=0, vmax=vmax)
-    ax.set_xlabel("LST  (h)")
-    ax.set_title(LABELS[key], fontsize=9)
+_qabs = [p[4] for p in panels if p] + [p[5] for p in panels if p]
+_qdif = [p[6] for p in panels if p]
+if _qabs:
+    _pos = np.concatenate([q[q > 0].ravel() for q in _qabs if (q > 0).any()]) \\
+            if any((q > 0).any() for q in _qabs) else np.array([0.01])
+    vmax_abs  = max(float(np.nanpercentile(_pos, 99)), 0.01)
+    _dif_flat = np.concatenate([np.abs(d).ravel() for d in _qdif])
+    vmax_diff = max(float(np.nanpercentile(_dif_flat[np.isfinite(_dif_flat)], 99)), 0.01)
+else:
+    vmax_abs = vmax_diff = 0.01
 
-axes[0].set_ylabel("z  (m)")
-fig.suptitle(f"{SWEEP_GROUP}: q_l time-height (raytracer ensemble mean)")
-fig.tight_layout()
+pcm_abs = pcm_diff = None
+for p in panels:
+    if p is None:
+        continue
+    col, key, t_h, z_ax, ql_3, ql_1, diff = p
+    pcm_abs  = axes[0, col].pcolormesh(t_h, z_ax, ql_3.T, cmap="Blues", vmin=0, vmax=vmax_abs)
+    axes[1, col].pcolormesh(t_h, z_ax, ql_1.T, cmap="Blues", vmin=0, vmax=vmax_abs)
+    pcm_diff = axes[2, col].pcolormesh(t_h, z_ax, diff.T, cmap="RdBu_r",
+                                         vmin=-vmax_diff, vmax=vmax_diff)
+    axes[0, col].set_title(LABELS[key], fontsize=9)
+    axes[2, col].set_xlabel("LST  (h)")
+
+for row, row_lbl in enumerate(["3D", "1D", "3D − 1D"]):
+    axes[row, 0].set_ylabel(f"z (m)\\n{row_lbl}")
+
+if pcm_abs is not None:
+    fig.colorbar(pcm_abs,  ax=axes[:2, :], location="right", shrink=0.6,
+                 label=r"$q_l$  (g kg$^{-1}$)")
+    fig.colorbar(pcm_diff, ax=axes[2, :],  location="right", shrink=0.6,
+                 label=r"$\\Delta q_l$  (g kg$^{-1}$)")
+fig.suptitle(f"{SWEEP_GROUP}: q_l time-height (ensemble mean)")
 _savefig(f"{SWEEP_GROUP}_ql_timeh.pdf", bbox_inches="tight")
 plt.show()
 """
@@ -415,489 +404,54 @@ _savefig(f"{SWEEP_GROUP}_seb_components.pdf", bbox_inches="tight")
 plt.show()
 """
 
-SEB_EF = """\
-# ── Evaporative fraction + SEB residual ──────────────────────────────────────
-fig, axes = plt.subplots(1, 3, figsize=(16, 4))
-ax_ef, ax_res, ax_bar = axes  # ax_bar has param-value x-axis — do NOT sharex
+SEB_BO = """\
+# ── Bowen ratio: timeseries + vs sweep param ─────────────────────────────────
+fig, (ax_bo, ax_bar) = plt.subplots(1, 2, figsize=(12, 4))
 
-param_vals_ef, ef_1d_vals, ef_3d_vals = [], [], []
+bo_1d_vals, bo_3d_vals = [], []
 
 for key in available:
-    d   = data[key]
-    c   = COLORS[key]
-    lbl = LABELS[key]
+    d = data[key]
+    c = COLORS[key]
     for rt_key, sm in [("2stream", d["s2s_mean"]), ("raytracer", d["srt_mean"])]:
         if sm is None:
             continue
+        H   = sm["H"].values
+        LE  = sm["LE"].values
+        bo  = np.where(LE > 1.0, H / LE, np.nan)
         t_  = _to_plottime(sm["t_local"].values)
-        ef  = evaporative_fraction(sm)
-        day = sm["Rnet"].values > 50
-        ax_ef.plot(t_[day], np.asarray(ef)[day], color=c,
+        day = (sm["Rnet"].values > 50) & (H > 0)
+        ax_bo.plot(t_[day], bo[day], color=c,
                    ls="-" if rt_key == "2stream" else "--", lw=1.2)
-        res = seb_residual(sm)
-        ax_res.plot(t_, np.asarray(res), color=c,
-                    ls="-" if rt_key == "2stream" else "--", lw=1.2)
         if day.any():
-            if rt_key == "2stream":
-                ef_1d_vals.append((PARAMS[key], float(np.nanmean(np.asarray(ef)[day]))))
-            else:
-                ef_3d_vals.append((PARAMS[key], float(np.nanmean(np.asarray(ef)[day]))))
+            bo_mean = float(np.nanmean(bo[day]))
+            (bo_1d_vals if rt_key == "2stream" else bo_3d_vals).append(
+                (PARAMS[key], bo_mean))
 
-ax_ef.set_ylabel("EF  (–)")
-ax_ef.set_title("Evaporative fraction  (daytime)")
-ax_res.set_ylabel("SEB residual  (W m⁻²)")
-ax_res.set_title("$R_{net} - (H+LE+G)$")
+ax_bo.set_ylabel("Bo = H / LE  (–)")
+ax_bo.set_title("(a) Bowen ratio  (daytime)")
 _lh_c = [Line2D([0],[0], color=COLORS[k], lw=2, label=LABELS[k]) for k in available]
 _lh_s = [Line2D([0],[0], color="k", ls="-",  lw=1.5, label="1D"),
           Line2D([0],[0], color="k", ls="--", lw=1.5, label="3D")]
-ax_res.legend(handles=_lh_c + _lh_s, fontsize=7)
+ax_bo.legend(handles=_lh_c + _lh_s, fontsize=7, ncol=2)
+ax_bo.xaxis_date()
 
-# Bar: daytime-mean EF vs param
-if ef_1d_vals:
-    p1d, e1d = zip(*sorted(ef_1d_vals))
-    ax_bar.plot(p1d, e1d, "o-", color="C0", lw=1.5, label="1D")
-if ef_3d_vals:
-    p3d, e3d = zip(*sorted(ef_3d_vals))
-    ax_bar.plot(p3d, e3d, "s--", color="C1", lw=1.5, label="3D")
+if bo_1d_vals:
+    p1d, b1d = zip(*sorted(bo_1d_vals))
+    ax_bar.plot(p1d, b1d, "o-", color="C0", lw=1.5, label="1D")
+if bo_3d_vals:
+    p3d, b3d = zip(*sorted(bo_3d_vals))
+    ax_bar.plot(p3d, b3d, "s--", color="C1", lw=1.5, label="3D")
 ax_bar.set_xlabel(f"{SWEEP_GROUP}  ({PARAM_UNIT})")
-ax_bar.set_ylabel("Daytime-mean EF")
-ax_bar.set_title("EF vs sweep param")
+ax_bar.set_ylabel("Daytime-mean Bo")
+ax_bar.set_title("(b) Bo vs sweep param")
 ax_bar.legend(fontsize=8)
 
-for ax in [ax_ef, ax_res]:
-    ax.xaxis_date()
-
 fig.autofmt_xdate()
 fig.tight_layout()
-_savefig(f"{SWEEP_GROUP}_seb_ef.pdf", bbox_inches="tight")
+_savefig(f"{SWEEP_GROUP}_bowen_ratio.pdf", bbox_inches="tight")
 plt.show()
 """
-
-ENT_HELPERS = """\
-# ── Entrainment helper functions ──────────────────────────────────────────────
-FLUX_ZMIN = 500.0
-FLUX_ZMAX = 3500.0
-JUMP_DZ   = 250.0
-
-
-def _find_bl_top(thv_flux_prof, zh):
-    mask = (zh >= FLUX_ZMIN) & (zh <= FLUX_ZMAX)
-    if mask.sum() == 0:
-        return np.nan, np.nan
-    idx_rel = np.argmin(thv_flux_prof[mask])
-    return float(zh[mask][idx_rel]), float(thv_flux_prof[mask][idx_rel])
-
-
-def _scalar_jump(mean_prof, z, z_top, dz=JUMP_DZ):
-    above = mean_prof[(z >= z_top) & (z <= z_top + dz)]
-    below = mean_prof[(z >= z_top - dz) & (z < z_top)]
-    if len(above) == 0 or len(below) == 0:
-        return np.nan
-    return float(above.mean() - below.mean())
-
-
-def _method_flux_jump(s):
-    # we = -<w'thv'>_top / Delta_thv  (Lilly 1968)
-    t, zh, z = s["t_sec"], s["zh"], s["z"]
-    thv_flux_all, mean_all = s["thv_flux"], s["thv"]
-    nt = len(t)
-    we, z_top_ts, flux_top, delta = [np.full(nt, np.nan) for _ in range(4)]
-    for i in range(nt):
-        zt, _ = _find_bl_top(thv_flux_all[i], zh)
-        if not np.isfinite(zt):
-            continue
-        z_top_ts[i] = zt
-        f = float(np.interp(zt, zh, thv_flux_all[i]))
-        flux_top[i] = f
-        d = _scalar_jump(mean_all[i], z, zt)
-        delta[i] = d
-        if np.isfinite(d) and np.abs(d) > 1e-6:
-            we[i] = -f / d
-    return t, we * 1e3, z_top_ts, flux_top, delta
-
-
-def _load_ext(run_dir):
-    \"\"\"Load stats + thv/thv_flux (not in standard load_stats) as a plain dict.\"\"\"
-    ds_stats = load_stats(run_dir)
-    # Convert xr.Dataset to plain dict of numpy arrays for entrainment code
-    s = {k: ds_stats[k].values for k in ds_stats.data_vars}
-    s["z"]  = ds_stats.coords["z"].values
-    s["zh"] = ds_stats.coords["zh"].values
-    s["t_sec"] = ds_stats["t_sec"].values
-    s["t_local"] = ds_stats["t_local"].values
-    # Add thv and thv_flux (not in load_stats)
-    import xarray as _xr
-    _path = str(Path(run_dir) / "cass.default.0000000.nc")
-    _ds_thm = _xr.open_dataset(_path, group="thermo", decode_times=False)
-    s["thv"]      = _ds_thm["thv"].values
-    s["thv_flux"] = _ds_thm["thv_flux"].values
-    _ds_thm.close()
-    return s
-
-
-def _load_ext_ensemble(rep_dirs):
-    all_s = [_load_ext(d) for d in rep_dirs]
-    nt_min = min(s["t_sec"].shape[0] for s in all_s)
-    SPATIAL, TIMECOPY = {"z", "zh"}, {"t_local"}
-    out = {}
-    for key in all_s[0]:
-        if key in SPATIAL:
-            out[key] = all_s[0][key]
-        elif key in TIMECOPY:
-            out[key] = all_s[0][key][:nt_min]
-        else:
-            try:
-                out[key] = np.stack([s[key][:nt_min] for s in all_s]).mean(axis=0)
-            except Exception:
-                out[key] = all_s[0][key]
-    return out
-
-
-# ── Compute entrainment for each sweep value + RT type ────────────────────────
-ent_results = {}   # key -> {"2stream": {...}, "raytracer": {...}}
-for key in available:
-    d = data[key]
-    ent_results[key] = {}
-    for rt_key, dirs_ in [("2stream", d["dirs_2s"]), ("raytracer", d["dirs_rt"])]:
-        if not dirs_:
-            continue
-        print(f"  {key}/{rt_key}: loading {len(dirs_)} reps …", end=" ", flush=True)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            s_ens = _load_ext_ensemble(dirs_)
-        t, we, z_top, flux_top, dthv = _method_flux_jump(s_ens)
-        msk = lst_mask(s_ens)
-        print(f"we = {np.nanmean(we[msk]):.1f} mm/s")
-        ent_results[key][rt_key] = dict(
-            t=t, t_local=s_ens["t_local"], we=we, z_top=z_top)
-"""
-
-ENT_PLOTS = """\
-# ── Entrainment timeseries: z_top and we ──────────────────────────────────────
-fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
-first = True
-for key in available:
-    c = COLORS[key]
-    for rt_key, r in ent_results[key].items():
-        ls  = "-" if rt_key == "2stream" else "--"
-        t_num_e = _to_plottime(r["t_local"])
-        axes[0].plot(t_num_e, r["z_top"], color=c, ls=ls, lw=1.2)
-        axes[1].plot(t_num_e, r["we"],    color=c, ls=ls, lw=1.2)
-        if first:
-            msk = lst_mask(r["t_local"])
-            axvspan_window(axes[0], r["t_local"], msk, color="gold", alpha=0.12)
-            axvspan_window(axes[1], r["t_local"], msk, color="gold", alpha=0.12)
-            first = False
-
-axes[0].set_ylabel("z_top  (m)")
-axes[0].set_title("BL-top height  (min $\\\\langle w\'\\\\theta_v\'\\\\rangle$)")
-_lh_c = [Line2D([0],[0], color=COLORS[k], lw=2, label=LABELS[k]) for k in available]
-_lh_s = [Line2D([0],[0], color="k", ls="-",  lw=1.5, label="1D"),
-          Line2D([0],[0], color="k", ls="--", lw=1.5, label="3D")]
-_lh_w = [Line2D([0],[0], color="gold", lw=8, alpha=0.5, label="analysis window")]
-axes[0].legend(handles=_lh_c + _lh_s + _lh_w, fontsize=7, ncol=2)
-axes[0].set_ylim(0, 3500)
-axes[1].axhline(0, color="k", lw=0.5, ls=":")
-axes[1].set_ylabel(r"$w_e$  (mm s$^{-1}$)")
-axes[1].set_title(r"$-\\langle w\'\\theta_v\'\\rangle_\\mathrm{top}/\\Delta\\theta_v$")
-axes[1].xaxis_date()
-fig.autofmt_xdate()
-fig.tight_layout()
-_savefig(f"{SWEEP_GROUP}_entrainment_ts.pdf", bbox_inches="tight")
-plt.show()
-"""
-
-ENT_BAR = """\
-# ── Window-mean entrainment summary: we vs param value ───────────────────────
-param_vals_1d, we_1d_vals, we_1d_std = [], [], []
-param_vals_3d, we_3d_vals, we_3d_std = [], [], []
-
-for key in available:
-    for rt_key, r in ent_results[key].items():
-        msk = lst_mask(r["t_local"])[:len(r["we"])]
-        val = np.nanmean(r["we"][msk])
-        std = np.nanstd(r["we"][msk])
-        if rt_key == "2stream":
-            param_vals_1d.append(PARAMS[key])
-            we_1d_vals.append(val); we_1d_std.append(std)
-        else:
-            param_vals_3d.append(PARAMS[key])
-            we_3d_vals.append(val); we_3d_std.append(std)
-
-fig, ax = plt.subplots(figsize=(7, 4))
-if we_1d_vals:
-    ax.errorbar(param_vals_1d, we_1d_vals, we_1d_std, fmt="o-",
-                color="C0", lw=1.5, capsize=4, label="1D (2stream)")
-if we_3d_vals:
-    ax.errorbar(param_vals_3d, we_3d_vals, we_3d_std, fmt="s--",
-                color="C1", lw=1.5, capsize=4, label="3D (raytracer)")
-ax.set_xlabel(f"{SWEEP_GROUP}  ({PARAM_UNIT})")
-ax.set_ylabel(r"$\\langle w_e \\rangle$  (mm s$^{-1}$)  [LST 12:30–19:00]")
-ax.set_title(f"{SWEEP_GROUP}: window-mean entrainment rate")
-ax.axhline(0, color="k", lw=0.5)
-ax.legend()
-fig.tight_layout()
-_savefig(f"{SWEEP_GROUP}_entrainment_bar.pdf", bbox_inches="tight")
-plt.show()
-"""
-
-
-def cloud_root_section(group, sweep_keys_expr, expt_subpath_expr):
-    """
-    group: e.g. "cs_veg"
-    sweep_keys_expr: Python expression to get list of keys (subset to include)
-    expt_subpath_expr: lambda key -> relative path under SCRATCH/experiments/, as a Python f-string
-    """
-    return f"""\
-# ── Cloud-root turbulent flux profiles ───────────────────────────────────────
-# Loads from cloud_root_composite cache built by cloud_roots/submit_cloud_root_pipeline.sh.
-# If 3D composite data are missing for a case, that case is silently skipped.
-
-_RHO_CP = rho * cp
-_RHO_LV = rho * Lv * 1e-3   # g/kg m/s → W m⁻²
-LST_MIN_CR, LST_MAX_CR = 10.5, 17.5
-
-CASES_CR = []
-for _key in {sweep_keys_expr}:
-    _meta = ALL_EXPERIMENTS[_key]
-    _rs = make_runset(_key, n_reps=N_REPS)
-    for _rt, _ls in [("2stream", "-"), ("raytracer", "--")]:
-        _dirs = _rs.dirs.get(_rt, [])
-        if not _dirs:
-            continue
-        _run_root  = str(_dirs[0].parent)   # .../subdir/2stream  (parent of rep_XX)
-        _comp_expt = str(Path(_run_root).parent.relative_to(CASS_ROOT / "experiments"))
-        CASES_CR.append(dict(
-            key=f"{{_key}}/{{_rt}}",
-            label=_meta["label"] + (" 1D" if _rt == "2stream" else " 3D"),
-            color=_meta["color"], ls=_ls,
-            comp_expt=_comp_expt,
-            comp_rt=_rt,
-            run_root=_run_root,
-        ))
-
-def _compute_and_cache_profiles(case, n_reps=N_REPS, lst_min=LST_MIN_CR, lst_max=LST_MAX_CR):
-    run_root = Path(case["run_root"])
-    H_dom_reps, H_root_reps, H_free_reps   = [], [], []
-    LE_dom_reps, LE_root_reps, LE_free_reps = [], [], []
-    cloud_frac_reps = []
-    zeta = None
-    for i in range(1, n_reps + 1):
-        rep_dir = run_root / f"rep_{{i:02d}}"
-        cache = (COMPOSITE_ROOT / case["comp_expt"] / case["comp_rt"]
-                 / f"rep_{{i:02d}}" / "raw_flux_profile_cache.nc")
-        # Invalidate stale cache
-        if cache.exists():
-            with xr.open_dataset(str(cache)) as _chk:
-                if "f_free_thl" not in _chk or "t_hours" not in _chk:
-                    print(f"  {{case['key']}} rep_{{i:02d}}: cache outdated, recomputing")
-                    cache.unlink()
-        if not cache.exists():
-            if not (rep_dir / "thl.nc").exists():
-                print(f"  SKIP {{case['key']}} rep_{{i:02d}}: thl.nc not found")
-                continue
-            print(f"  {{case['key']}} rep_{{i:02d}}: computing from 3D fields ...", flush=True)
-            s     = load_stats(rep_dir)
-            ds_3d = load_3d_nc(rep_dir, variables=["thl", "qt", "ql", "w"])
-            ds_xy = load_xy_files(rep_dir, variables=["qlqi_path"])
-            res   = compute_normalized_cloud_root_profiles(ds_3d, ds_xy, s)
-            ds_3d.close()
-            if res["f_cloud_thl"].shape[0] == 0:
-                print(f"    WARNING: no valid timesteps, skipping")
-                continue
-            cache.parent.mkdir(parents=True, exist_ok=True)
-            xr.Dataset({{
-                "f_cloud_thl":  xr.DataArray(res["f_cloud_thl"],  dims=["time", "zeta"]),
-                "f_cloud_qv":   xr.DataArray(res["f_cloud_qv"],   dims=["time", "zeta"]),
-                "f_free_thl":   xr.DataArray(res["f_free_thl"],   dims=["time", "zeta"]),
-                "f_free_qv":    xr.DataArray(res["f_free_qv"],    dims=["time", "zeta"]),
-                "f_domain_thl": xr.DataArray(res["f_domain_thl"], dims=["time", "zeta"]),
-                "f_domain_qv":  xr.DataArray(res["f_domain_qv"],  dims=["time", "zeta"]),
-                "z_sl":         xr.DataArray(res["z_sl"],         dims=["time"]),
-                "cloud_frac":   xr.DataArray(res["cloud_frac"],   dims=["time"]),
-                "t_hours":      xr.DataArray(res["t_hours"],      dims=["time"]),
-            }}, coords={{"zeta": res["zeta"]}}).to_netcdf(str(cache))
-            print(f"    cached ({{res['f_cloud_thl'].shape[0]}} timesteps)")
-        else:
-            print(f"  {{case['key']}} rep_{{i:02d}}: cache hit")
-        ds = xr.open_dataset(str(cache))
-        zeta   = ds["zeta"].values
-        t_hrs  = ds["t_hours"].values
-        mask_t = (t_hrs >= lst_min) & (t_hrs <= lst_max)
-        if mask_t.sum() == 0:
-            ds.close(); continue
-        import warnings as _w
-        with _w.catch_warnings():
-            _w.filterwarnings("ignore", category=RuntimeWarning)
-            H_dom_reps.append( np.nanmean(ds["f_domain_thl"].values[mask_t] * _RHO_CP, axis=0))
-            H_root_reps.append(np.nanmean(ds["f_cloud_thl"].values[mask_t]  * _RHO_CP, axis=0))
-            H_free_reps.append(np.nanmean(ds["f_free_thl"].values[mask_t]   * _RHO_CP, axis=0))
-            LE_dom_reps.append( np.nanmean(ds["f_domain_qv"].values[mask_t] * _RHO_LV, axis=0))
-            LE_root_reps.append(np.nanmean(ds["f_cloud_qv"].values[mask_t]  * _RHO_LV, axis=0))
-            LE_free_reps.append(np.nanmean(ds["f_free_qv"].values[mask_t]   * _RHO_LV, axis=0))
-            cloud_frac_reps.append(float(np.nanmean(ds["cloud_frac"].values[mask_t])))
-        ds.close()
-    n = len(H_dom_reps)
-    def _s(lst): return np.stack(lst) if lst else np.empty((0,))
-    return (dict(zeta=zeta, n_reps=n,
-                 H_dom=_s(H_dom_reps),  H_root=_s(H_root_reps),  H_free=_s(H_free_reps),
-                 LE_dom=_s(LE_dom_reps), LE_root=_s(LE_root_reps), LE_free=_s(LE_free_reps)),
-            np.array(cloud_frac_reps))
-
-abs_profiles, cloud_fracs = {{}}, {{}}
-for _case in CASES_CR:
-    print(f"\\n{{_case['label']}}")
-    _ap, _cf = _compute_and_cache_profiles(_case)
-    abs_profiles[_case["key"]] = _ap
-    cloud_fracs[_case["key"]]  = _cf
-    _n = _ap["n_reps"]
-    if _n > 0:
-        _sd = _cf.std(ddof=1) if _n > 1 else 0.0
-        print(f"  -> {{_n}} reps  alpha = {{_cf.mean():.3f}} +/- {{_sd:.3f}}")
-    else:
-        print(f"  NO COMPOSITE DATA")
-
-cases_with_data = [c for c in CASES_CR if abs_profiles[c["key"]]["n_reps"] > 0]
-print(f"\\n{{len(cases_with_data)}} / {{len(CASES_CR)}} cases have composite data")
-"""
-
-
-CLOUD_ROOT_PLOT = """\
-# ── Absolute H and LE flux profiles: cloud-root vs cloud-free ────────────────
-if not cases_with_data:
-    print("No cloud-root composite data available yet — run submit_cloud_root_pipeline.sh")
-else:
-    CONDS = [("H_root", "LE_root", "cloud-root", "--"),
-             ("H_free", "LE_free", "cloud-free",  "-")]
-
-    RT_ROWS = [("3D", "--"), ("1D", "-")]   # (row title, case["ls"])
-
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
-    for row, (rt_label, rt_ls) in enumerate(RT_ROWS):
-        rt_cases = [c for c in cases_with_data if c["ls"] == rt_ls]
-        for col, var in enumerate(["H", "LE"]):
-            ax = axes[row, col]
-            ax.axhline(1.0, color="gray", ls="--", lw=0.8)
-            ax.axvline(0,   color="gray", ls=":",  lw=0.5)
-            for case in rt_cases:
-                ap   = abs_profiles[case["key"]]
-                zeta = ap["zeta"]
-                for h_key, le_key, lbl, ls_c in CONDS:
-                    arr = ap[h_key if var == "H" else le_key]
-                    mu  = np.nanmean(arr, axis=0)
-                    sd  = np.nanstd(arr, axis=0, ddof=1) if ap["n_reps"] > 1 else np.zeros_like(mu)
-                    ax.plot(mu, zeta, color=case["color"], ls=ls_c, lw=1.5)
-                    ax.fill_betweenx(zeta, mu-sd, mu+sd, alpha=0.10, color=case["color"])
-            ax.set_ylim(0, 1)
-            ax.set_title(f"{rt_label} — {var}  (W m⁻², resolved)")
-            if col == 0:
-                ax.set_ylabel("z / z_sl")
-            if row == 1:
-                ax.set_xlabel(f"{var}  (W m⁻²)")
-
-    _lh_cond = [Line2D([0],[0], color="k", ls="-",  lw=1.5, label="cloud-free"),
-                Line2D([0],[0], color="k", ls="--", lw=1.5, label="cloud-root")]
-    _seen_cols = set()
-    _lh_params = []
-    for _c in cases_with_data:
-        if _c["color"] not in _seen_cols:
-            _lbl = _c["label"].replace(" 1D", "").replace(" 3D", "")
-            _lh_params.append(Line2D([0],[0], color=_c["color"], lw=2, label=_lbl))
-            _seen_cols.add(_c["color"])
-    axes[1,1].legend(handles=_lh_cond + _lh_params, fontsize=7, loc="lower right")
-    fig.suptitle(f"{SWEEP_GROUP}: cloud-root vs cloud-free resolved turbulent flux profiles")
-    fig.tight_layout()
-    _savefig(f"{SWEEP_GROUP}_cloudroot_profiles.pdf", bbox_inches="tight")
-    plt.show()
-"""
-
-
-CLOUD_ROOT_COMP_DIFF = """# ── 3D − 1D cloud-root composite difference across sweep ───────────────────────
-# Rows: w’θ_l’ and w’q_v’; Cols: one per sweep value; shared colour scale per row.
-# Requires: cloud_root_composite cache (events_{orient}.nc per rep)
-import sys as _sys
-_sys.path.insert(0, str(Path.cwd() / "cloud_roots"))
-from cloud_root_composite_average import average_reps
-
-import warnings as _warnings
-print("Loading 2D composites ...")
-_comp2d = {}
-for _case in CASES_CR:
-    with _warnings.catch_warnings():
-        _warnings.filterwarnings("ignore", category=RuntimeWarning)
-        _comp2d[_case["key"]] = average_reps(
-            COMPOSITE_ROOT, _case["comp_expt"], _case["comp_rt"],
-            n_reps=N_REPS, verbose=False,
-        )
-    _tag = ", ".join(
-        f"{o}:{_comp2d[_case['key']][o].attrs['n_reps']}reps"
-        for o in ("xz", "yz") if o in _comp2d[_case["key"]]
-    )
-    print(f"  {_case['label']}: {_tag}")
-
-# Build 3D/1D pairs per sweep key and orientation
-_pairs = {}   # sweep_key -> {orient: {"1D": ds, "3D": ds}}
-for _k, _ in sweep:
-    _k_2s = f"{_k}/2stream"
-    _k_rt = f"{_k}/raytracer"
-    if _k_2s not in _comp2d or _k_rt not in _comp2d:
-        continue
-    _pairs[_k] = {}
-    for _o in ("xz", "yz"):
-        if _o in _comp2d[_k_2s] and _o in _comp2d[_k_rt]:
-            _pairs[_k][_o] = {"1D": _comp2d[_k_2s][_o], "3D": _comp2d[_k_rt][_o]}
-
-_VARS_DIFF = [
-    ("w_thl_mean", "RdBu_r", "3D−1D  Δw’θₗ’  (K m s⁻¹)"),
-    ("w_qv_mean",  "BrBG",   "3D−1D  Δw’q_v’  (g kg⁻¹ m s⁻¹)"),
-]
-
-for orient in ("xz", "yz"):
-    _keys = [k for k, _ in sweep if k in _pairs and orient in _pairs[k]]
-    if not _keys:
-        print(f"No {orient} composite diff data available — skipping")
-        continue
-    n_cols = len(_keys)
-    hl = "x/L" if orient == "xz" else "y/L"
-
-    fig, axes = plt.subplots(2, n_cols, figsize=(3.2 * n_cols, 7), squeeze=False,
-                                constrained_layout=True)
-    for row, (var, cmap, clabel) in enumerate(_VARS_DIFF):
-        _all_diffs = np.concatenate([
-            (_pairs[k][orient]["3D"][var].values -
-             _pairs[k][orient]["1D"][var].values).ravel()
-            for k in _keys
-        ])
-        vmax = float(np.nanpercentile(np.abs(_all_diffs), 98))
-
-        _pcms = []
-        for col, k in enumerate(_keys):
-            ax   = axes[row, col]
-            ds3  = _pairs[k][orient]["3D"]
-            ds1  = _pairs[k][orient]["1D"]
-            diff = ds3[var].values - ds1[var].values
-            pcm  = ax.pcolormesh(ds3.xL.values, ds3.z_nd.values, diff,
-                                  cmap=cmap, shading="auto", vmin=-vmax, vmax=vmax)
-            _pcms.append(pcm)
-            ax.axvline(-0.5, color="0.4", lw=0.8, ls="--")
-            ax.axvline( 0.5, color="0.4", lw=0.8, ls="--")
-            ax.axhline( 1.0, color="0.4", lw=0.8, ls=":")
-            ax.set_xlim(-1, 1)
-            ax.set_ylim(0, 1)
-            if col == 0:
-                ax.set_ylabel("z / z_sl")
-            if row == 0:
-                ax.set_title(f"{LABELS[k]}")
-            if row == 1:
-                ax.set_xlabel(hl)
-        fig.colorbar(_pcms[-1], ax=axes[row, :], location="right",
-                     shrink=0.8, label=clabel)
-
-    fig.suptitle(f"{SWEEP_GROUP}: 3D − 1D cloud-root composite  ({orient})")
-    _savefig(f"{SWEEP_GROUP}_cloudroot_composite_diff_{orient}.pdf", bbox_inches="tight")
-    plt.show()
-"""
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # cs_veg_comparison.ipynb
@@ -920,8 +474,6 @@ Skin heat capacity sweep (J&M replication).  All runs: aerosols off, zero wind.
 1. LWP overview
 2. Thermodynamic structure
 3. Surface energy balance
-4. Entrainment
-5. Cloud-root turbulent structure
 """
 
 cs_veg_config = config_cell(
@@ -931,12 +483,6 @@ cs_veg_config = config_cell(
     param_unit=r"J m$^{-2}$ K$^{-1}$",
 )
 
-cs_veg_cr = cloud_root_section(
-    group="cs_veg",
-    sweep_keys_expr="[k for k in available]",
-    expt_subpath_expr="cs_veg/{key}",
-)
-
 cs_veg_cells = [
     md(cs_veg_header),
     code(IMPORTS),
@@ -944,27 +490,19 @@ cs_veg_cells = [
     md("---\n## Data loading"),
     code(DATA_LOAD),
     md("---\n## 1. LWP overview"),
-    code(LWP_SECTION),
-    code(LWP_INTEGRAL_BAR),
+    code(LWP_SUMMARY),
     md("---\n## 2. Thermodynamic structure"),
     code(THERMO_TIMEH),
     code(THERMO_PROFILES),
     md("---\n## 3. Surface energy balance"),
     code(SEB_SECTION),
-    code(SEB_EF),
-    md("---\n## 4. Entrainment\n\nMethod: θ_v flux-jump, `wₑ = −⟨w′θ_v′⟩_top / Δθ_v`"),
-    code(ENT_HELPERS),
-    code(ENT_PLOTS),
-    code(ENT_BAR),
-    md("---\n## 5. Cloud-root turbulent structure\n\nLoads from `cloud_root_composite` cache. Skips missing cases."),
-    code(cs_veg_cr),
-    code(CLOUD_ROOT_PLOT),
-    code(CLOUD_ROOT_COMP_DIFF),
+    code(SEB_BO),
 ]
 
-with open(HERE / "cs_veg_comparison.ipynb", "w") as f:
-    json.dump(nb(cs_veg_cells), f, indent=1)
-print("Wrote cs_veg_comparison.ipynb")
+if "cs_veg" in _TARGETS:
+    with open(HERE / "cs_veg_comparison.ipynb", "w") as f:
+        json.dump(nb(cs_veg_cells), f, indent=1)
+    print("Wrote cs_veg_comparison.ipynb")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -987,20 +525,12 @@ Soil moisture nudging sweep.  All runs: aerosols off, zero wind.
 1. LWP overview
 2. Thermodynamic structure
 3. Surface energy balance
-4. Entrainment
-5. Cloud-root turbulent structure
 """
 
 sm_config = config_cell(
     group="soil_moisture",
     title="soil_moisture",
     param_unit=r"m$^3$ m$^{-3}$",
-)
-
-sm_cr = cloud_root_section(
-    group="soil_moisture",
-    sweep_keys_expr="[k for k in available]",
-    expt_subpath_expr="soil_moisture/{key}",
 )
 
 sm_cells = [
@@ -1010,27 +540,19 @@ sm_cells = [
     md("---\n## Data loading"),
     code(DATA_LOAD),
     md("---\n## 1. LWP overview"),
-    code(LWP_SECTION),
-    code(LWP_INTEGRAL_BAR),
+    code(LWP_SUMMARY),
     md("---\n## 2. Thermodynamic structure"),
     code(THERMO_TIMEH),
     code(THERMO_PROFILES),
     md("---\n## 3. Surface energy balance"),
     code(SEB_SECTION),
-    code(SEB_EF),
-    md("---\n## 4. Entrainment\n\nMethod: θ_v flux-jump, `wₑ = −⟨w′θ_v′⟩_top / Δθ_v`"),
-    code(ENT_HELPERS),
-    code(ENT_PLOTS),
-    code(ENT_BAR),
-    md("---\n## 5. Cloud-root turbulent structure\n\nLoads from `cloud_root_composite` cache. Skips missing cases."),
-    code(sm_cr),
-    code(CLOUD_ROOT_PLOT),
-    code(CLOUD_ROOT_COMP_DIFF),
+    code(SEB_BO),
 ]
 
-with open(HERE / "soil_moisture_comparison.ipynb", "w") as f:
-    json.dump(nb(sm_cells), f, indent=1)
-print("Wrote soil_moisture_comparison.ipynb")
+if "soil_moisture" in _TARGETS:
+    with open(HERE / "soil_moisture_comparison.ipynb", "w") as f:
+        json.dump(nb(sm_cells), f, indent=1)
+    print("Wrote soil_moisture_comparison.ipynb")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1056,8 +578,6 @@ Constant u-wind sweep.  All runs: aerosols off; `swlspres=uflux` enforces exact 
 1. LWP overview
 2. Thermodynamic structure
 3. Surface energy balance
-4. Entrainment
-5. Cloud-root turbulent structure
 """
 
 wu_config = config_cell(
@@ -1067,12 +587,6 @@ wu_config = config_cell(
     extra_note="# NOTE: wind_u_10p0/raytracer may be absent; RunSet skips missing reps automatically.",
 )
 
-wu_cr = cloud_root_section(
-    group="wind_u",
-    sweep_keys_expr="[k for k in available]",
-    expt_subpath_expr="wind_u/{key}",
-)
-
 wu_cells = [
     md(wu_header),
     code(IMPORTS),
@@ -1080,26 +594,70 @@ wu_cells = [
     md("---\n## Data loading"),
     code(DATA_LOAD),
     md("---\n## 1. LWP overview"),
-    code(LWP_SECTION),
-    code(LWP_INTEGRAL_BAR),
+    code(LWP_SUMMARY),
     md("---\n## 2. Thermodynamic structure"),
     code(THERMO_TIMEH),
     code(THERMO_PROFILES),
     md("---\n## 3. Surface energy balance"),
     code(SEB_SECTION),
-    code(SEB_EF),
-    md("---\n## 4. Entrainment\n\nMethod: θ_v flux-jump, `wₑ = −⟨w′θ_v′⟩_top / Δθ_v`"),
-    code(ENT_HELPERS),
-    code(ENT_PLOTS),
-    code(ENT_BAR),
-    md("---\n## 5. Cloud-root turbulent structure\n\nLoads from `cloud_root_composite` cache. Skips missing cases."),
-    code(wu_cr),
-    code(CLOUD_ROOT_PLOT),
-    code(CLOUD_ROOT_COMP_DIFF),
+    code(SEB_BO),
 ]
 
-with open(HERE / "wind_u_comparison.ipynb", "w") as f:
-    json.dump(nb(wu_cells), f, indent=1)
-print("Wrote wind_u_comparison.ipynb")
+if "wind_u" in _TARGETS:
+    with open(HERE / "wind_u_comparison.ipynb", "w") as f:
+        json.dump(nb(wu_cells), f, indent=1)
+    print("Wrote wind_u_comparison.ipynb")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# wind_geo_comparison.ipynb
+# ══════════════════════════════════════════════════════════════════════════════
+
+wg_header = """\
+# wind_geo sweep — comprehensive analysis
+
+Geostrophic wind sweep (realistic Ekman shear via `swlspres=geo`).
+All runs: aerosols off.
+
+| Key | u_g (m s⁻¹) | Note |
+|-----|------------|------|
+| `wind_geo_0`    | 0   | reference (no_aerosols_zero_wind) |
+| `wind_geo_2p5`  | 2.5 | |
+| `wind_geo_5p0`  | 5   | |
+| `wind_geo_7p5`  | 7.5 | |
+| `wind_geo_10p0` | 10  | |
+
+**Sections**
+1. LWP overview
+2. Thermodynamic structure
+3. Surface energy balance
+"""
+
+wg_config = config_cell(
+    group="wind_geo",
+    title="wind_geo",
+    param_unit=r"m s$^{-1}$",
+)
+
+wg_cells = [
+    md(wg_header),
+    code(IMPORTS),
+    wg_config,
+    md("---\n## Data loading"),
+    code(DATA_LOAD),
+    md("---\n## 1. LWP overview"),
+    code(LWP_SUMMARY),
+    md("---\n## 2. Thermodynamic structure"),
+    code(THERMO_TIMEH),
+    code(THERMO_PROFILES),
+    md("---\n## 3. Surface energy balance"),
+    code(SEB_SECTION),
+    code(SEB_BO),
+]
+
+if "wind_geo" in _TARGETS:
+    with open(HERE / "wind_geo_comparison.ipynb", "w") as f:
+        json.dump(nb(wg_cells), f, indent=1)
+    print("Wrote wind_geo_comparison.ipynb")
 
 print("\nAll done.")

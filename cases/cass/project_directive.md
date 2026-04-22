@@ -34,6 +34,13 @@ Three controls on the 3D-1D difference:
 4. **alpha_1D ~ 0.69, alpha_3D ~ 1.06** (time-mean): 1D suppresses cloud-root flux by ~31%
 5. **LWP divergence**: 3D RT produces ~50% higher LWP / ~60% deeper clouds by late afternoon
 6. **Mean-state nudge widens the gap** (unexpected; archived, see Observations)
+7. **Full α closure from observables**: α = 1 + β(t)·[(1-a)·δSW_cr + δLW_1D_mean]/(ρ·cp·<Q>),
+   with zero-fit proxies for every unobserved quantity:
+   - SW_out ≈ median(SW_dn | SW_dn > SW_clr)
+   - f_sh = f_sh_dom + (1 - f_sh_dom)·cf·μ₀²  (validated on CASS + Tijhuis 220 scenes)
+   - δLW: single constant from 1D model, same for both schemes
+   - Shadow definition: SW_dn < SW_clr (no arbitrary threshold)
+   - Result: α_3D r=0.976, α_3D/α_1D − 1 r=0.97 (see `analysis/delta_sw_prediction.ipynb`)
 
 ---
 
@@ -43,9 +50,8 @@ Three controls on the 3D-1D difference:
 |---|---|---|---|---|---|
 | no_aerosols | base, standard winds | -- | -- | 8 | COMPLETE |
 | no_aerosols_zero_wind | base, zero winds, no aero | -- | -- | 8 | COMPLETE |
-| base | standard winds + aerosols | -- | -- | 8 | COMPLETE (low priority, AOD too high) |
-| **rs_scale** | no_aero_zero_wind | `[land_surface] rs_scale` | 0.25, 0.5, 1.0, 2.0, 4.0 | 40 | NEW |
-| **sw_scale** | no_aero_zero_wind, RT only | `[radiation] swscalesfc_to_2str=true` | -- | 4 | scripts written |
+| **rs_scale** | no_aero_zero_wind | `[land_surface] rs_scale` | 0.25, 0.5, 1.0, 2.0, 4.0 | 40 | scripts written |
+| **sw_scale** | no_aero_zero_wind, RT only | `[radiation] swscalesfc_to_2str=true` | -- | 4 | SUBMITTED |
 | **wind_azi** | no_aero_zero_wind | wind toward sun, varying speed | TBD | TBD | TODO: finalize design |
 | wind_geo | base, no aero | `u_geo` via `--geo-wind` | 2.5, 5, 7.5, 10 m/s | 32 | scripts written |
 
@@ -93,14 +99,14 @@ Location: `$SCRATCH/CASS_LES/experiments/wind_geo/u_<VALUE>/`
 ## Archived Experiments
 
 Code removed from repo (recoverable from git history).
-See `cleanup_checklist.md` for remaining scratch/HPSS tasks.
 
 | Experiment | HPSS | Scratch | Note |
 |---|---|---|---|
 | soil_moisture | `/home/m/mpowell/CASS_LES/soil_moisture/` (7 tars, verified) | deleted | 4.2 TB archived |
 | mean_state_nudge | not archived (re-derivable) | deleted | 599 GB freed |
-| cs_veg (5 values) | TODO | still on scratch | 40 runs, COMPLETE |
-| wind_u (5 values) | TODO | still on scratch | production COMPLETE |
+| base | not archived | deleted 2026-04-08 | superseded by no_aerosols |
+| cs_veg (5 values) | `/home/m/mpowell/CASS_LES/cs_veg/` (5 tars, verified) | deleted | 4.7 TB archived, 40 runs |
+| wind_u (5 values) | `/home/m/mpowell/CASS_LES/wind_u/` (5 tars, verified) | deleted | 5.7 TB archived, production COMPLETE |
 
 ---
 

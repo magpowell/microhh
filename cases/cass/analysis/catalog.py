@@ -64,6 +64,44 @@ ALL_EXPERIMENTS: dict[str, dict] = {
         group  = "aerosol",
         color  = "C1",
     ),
+    # ── wind_geo (geostrophic wind sweep) ─────────────────────────────────────
+    # u_g = 0 reference: aliases no_aerosols_zero_wind data root so it shows up
+    # in list_group("wind_geo") as the starting point.
+    "wind_geo_0": dict(
+        label  = r"$u_g = 0\,\mathrm{m\,s^{-1}}$",
+        root   = CASS_ROOT / "experiments/no_aerosols_zero_wind",
+        group  = "wind_geo",
+        param  = 0.0,
+        color  = "#dadaeb",
+    ),
+    "wind_geo_2p5": dict(
+        label  = r"$u_g = 2.5\,\mathrm{m\,s^{-1}}$",
+        root   = CASS_ROOT / "experiments/wind_geo/u_2p5",
+        group  = "wind_geo",
+        param  = 2.5,
+        color  = "#9e9ac8",
+    ),
+    "wind_geo_5p0": dict(
+        label  = r"$u_g = 5\,\mathrm{m\,s^{-1}}$",
+        root   = CASS_ROOT / "experiments/wind_geo/u_5p0",
+        group  = "wind_geo",
+        param  = 5.0,
+        color  = "#756bb1",
+    ),
+    "wind_geo_7p5": dict(
+        label  = r"$u_g = 7.5\,\mathrm{m\,s^{-1}}$",
+        root   = CASS_ROOT / "experiments/wind_geo/u_7p5",
+        group  = "wind_geo",
+        param  = 7.5,
+        color  = "#54278f",
+    ),
+    "wind_geo_10p0": dict(
+        label  = r"$u_g = 10\,\mathrm{m\,s^{-1}}$",
+        root   = CASS_ROOT / "experiments/wind_geo/u_10p0",
+        group  = "wind_geo",
+        param  = 10.0,
+        color  = "#3f007d",
+    ),
 }
 
 # Archived experiments (data on HPSS, recoverable from git history):
