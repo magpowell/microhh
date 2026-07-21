@@ -142,6 +142,8 @@ class Thermo_moist : public Thermo<TF>
         bool swcross_qsat;
         bool swcross_qlqithv;
 
+        bool swqsqg_to_rad;  ///< Add frozen precipitation (qs+qg) to the radiation cloud ice (SCREAM/P3-like).
+
         std::vector<std::string> dumplist;         ///< List with all 3d dumps from the ini file.
 
         void create_column(Column<TF>&); ///< Initialization of the single column output.

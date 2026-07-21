@@ -489,6 +489,7 @@ namespace
             TF* restrict T, TF* restrict T_h, TF* restrict vmr_h2o,
             TF* restrict clwp, TF* restrict ciwp, TF* restrict T_sfc,
             const TF* restrict thl, const TF* restrict qt, const TF* restrict thl_bot,
+            const TF* restrict qsnow, const TF* restrict qgrpl,
             const TF* restrict p, const TF* restrict ph,
             const int istart, const int iend,
             const int jstart, const int jend,
@@ -513,8 +514,11 @@ namespace
             const int ijk_nogc = (i-igc) + (j-jgc)*jj_nogc + (k-kgc)*kk_nogc;
             const Struct_sat_adjust<TF> ssa = sat_adjust_g(thl[ijk], qt[ijk], p[k], ex);
 
+            // Frozen precipitation is radiatively active if qs/qg are passed (swqsqg_to_rad).
+            const TF qpi = (qsnow != nullptr) ? qsnow[ijk] + qgrpl[ijk] : TF(0.);
+
             clwp[ijk_nogc] = ssa.ql * dpg;
-            ciwp[ijk_nogc] = ssa.qi * dpg;
+            ciwp[ijk_nogc] = (ssa.qi + qpi) * dpg;
 
             const TF qv = qt[ijk] - ssa.ql - ssa.qi;
             vmr_h2o[ijk_nogc] = qv / (ep<TF> - ep<TF>*qv);
@@ -553,6 +557,7 @@ namespace
             TF* restrict T, TF* restrict T_h, TF* restrict vmr_h2o, TF* restrict rh,
             TF* restrict clwp, TF* restrict ciwp, TF* restrict T_sfc,
             const TF* restrict thl, const TF* restrict qt, const TF* restrict thl_bot,
+            const TF* restrict qsnow, const TF* restrict qgrpl,
             const TF* restrict p, const TF* restrict ph,
             const int istart, const int iend,
             const int jstart, const int jend,
@@ -577,8 +582,11 @@ namespace
             const int ijk_nogc = (i-igc) + (j-jgc)*jj_nogc + (k-kgc)*kk_nogc;
             const Struct_sat_adjust<TF> ssa = sat_adjust_g(thl[ijk], qt[ijk], p[k], ex);
 
+            // Frozen precipitation is radiatively active if qs/qg are passed (swqsqg_to_rad).
+            const TF qpi = (qsnow != nullptr) ? qsnow[ijk] + qgrpl[ijk] : TF(0.);
+
             clwp[ijk_nogc] = ssa.ql * dpg;
-            ciwp[ijk_nogc] = ssa.qi * dpg;
+            ciwp[ijk_nogc] = (ssa.qi + qpi) * dpg;
 
             const TF qv = qt[ijk] - ssa.ql - ssa.qi;
             vmr_h2o[ijk_nogc] = qv / (ep<TF> - ep<TF>*qv);
@@ -618,6 +626,7 @@ namespace
             TF* const restrict T, TF* const restrict T_h, TF* const restrict vmr_h2o, TF* const restrict rh,
             TF* const restrict clwp, TF* const restrict ciwp, TF* const restrict T_sfc,
             const TF* const restrict thl, const TF* const restrict qt, const TF* const restrict thl_bot,
+            const TF* const restrict qsnow, const TF* const restrict qgrpl,
             const TF* const restrict p, const TF* const restrict ph,
             const int* const col_i, const int* const col_j,
             const int n_cols,
@@ -646,9 +655,12 @@ namespace
             {
                 const Struct_sat_adjust<TF> ssa = sat_adjust_g(thl[ijk], qt[ijk], p[k], exner(p[k]));
 
+                // Frozen precipitation is radiatively active if qs/qg are passed (swqsqg_to_rad).
+                const TF qpi = (qsnow != nullptr) ? qsnow[ijk] + qgrpl[ijk] : TF(0.);
+
                 const TF dpg = (ph[k] - ph[k+1]) / Constants::grav<TF>;
                 clwp[ijk_out] = ssa.ql * dpg;
-                ciwp[ijk_out] = ssa.qi * dpg;
+                ciwp[ijk_out] = (ssa.qi + qpi) * dpg;
 
                 const TF qv = qt[ijk] - ssa.ql - ssa.qi;
                 vmr_h2o[ijk_out] = qv / (ep<TF> - ep<TF>*qv);
@@ -1286,6 +1298,8 @@ void Thermo_moist<TF>::get_radiation_fields_g(
             clwp.fld_g, ciwp.fld_g, T_h.fld_bot_g,
             fields.sp.at("thl")->fld_g, fields.sp.at("qt")->fld_g,
             fields.sp.at("thl")->fld_bot_g,
+            swqsqg_to_rad ? fields.sp.at("qs")->fld_g.data() : nullptr,
+            swqsqg_to_rad ? fields.sp.at("qg")->fld_g.data() : nullptr,
             bs.pref_g, bs.prefh_g,
             gd.istart, gd.iend,
             gd.jstart, gd.jend,
@@ -1317,6 +1331,8 @@ void Thermo_moist<TF>::get_radiation_fields_g(
             clwp.fld_g, ciwp.fld_g, T_h.fld_bot_g,
             fields.sp.at("thl")->fld_g, fields.sp.at("qt")->fld_g,
             fields.sp.at("thl")->fld_bot_g,
+            swqsqg_to_rad ? fields.sp.at("qs")->fld_g.data() : nullptr,
+            swqsqg_to_rad ? fields.sp.at("qg")->fld_g.data() : nullptr,
             bs.pref_g, bs.prefh_g,
             gd.istart, gd.iend,
             gd.jstart, gd.jend,
@@ -1362,6 +1378,8 @@ void Thermo_moist<TF>::get_radiation_columns_g(
             fields.sp.at("thl")->fld_g,
             fields.sp.at("qt")->fld_g,
             fields.sp.at("thl")->fld_bot_g,
+            swqsqg_to_rad ? fields.sp.at("qs")->fld_g.data() : nullptr,
+            swqsqg_to_rad ? fields.sp.at("qg")->fld_g.data() : nullptr,
             bs.pref_g,
             bs.prefh_g,
             col_i_g,

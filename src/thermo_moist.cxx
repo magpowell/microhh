@@ -796,6 +796,7 @@ namespace
             TF* restrict clwp, TF* restrict ciwp, TF* restrict T_sfc,
             TF* restrict thlh, TF* restrict qth,
             const TF* restrict thl, const TF* restrict qt, const TF* restrict thl_bot,
+            const TF* restrict qsnow, const TF* restrict qgrpl,
             const TF* restrict p, const TF* restrict ph,
             const int istart, const int iend,
             const int jstart, const int jend,
@@ -820,8 +821,11 @@ namespace
                     const int ijk_nogc = (i-igc) + (j-jgc)*jj_nogc + (k-kgc)*kk_nogc;
                     const Struct_sat_adjust<TF> ssa = sat_adjust(thl[ijk], qt[ijk], p[k], ex);
 
+                    // Frozen precipitation is radiatively active if qs/qg are passed (swqsqg_to_rad).
+                    const TF qpi = (qsnow != nullptr) ? qsnow[ijk] + qgrpl[ijk] : TF(0.);
+
                     clwp[ijk_nogc] = ssa.ql * dpg;
-                    ciwp[ijk_nogc] = ssa.qi * dpg;
+                    ciwp[ijk_nogc] = (ssa.qi + qpi) * dpg;
 
                     const TF qv = qt[ijk] - ssa.ql - ssa.qi;
                     vmr_h2o[ijk_nogc] = qv / (ep<TF> - ep<TF>*qv);
@@ -875,6 +879,7 @@ namespace
             TF* restrict clwp, TF* restrict ciwp, TF* restrict T_sfc,
             TF* restrict thlh, TF* restrict qth,
             const TF* restrict thl, const TF* restrict qt, const TF* restrict thl_bot,
+            const TF* restrict qsnow, const TF* restrict qgrpl,
             const TF* restrict p, const TF* restrict ph,
             const int istart, const int iend,
             const int jstart, const int jend,
@@ -899,8 +904,11 @@ namespace
                     const int ijk_nogc = (i-igc) + (j-jgc)*jj_nogc + (k-kgc)*kk_nogc;
                     const Struct_sat_adjust<TF> ssa = sat_adjust(thl[ijk], qt[ijk], p[k], ex);
 
+                    // Frozen precipitation is radiatively active if qs/qg are passed (swqsqg_to_rad).
+                    const TF qpi = (qsnow != nullptr) ? qsnow[ijk] + qgrpl[ijk] : TF(0.);
+
                     clwp[ijk_nogc] = ssa.ql * dpg;
-                    ciwp[ijk_nogc] = ssa.qi * dpg;
+                    ciwp[ijk_nogc] = (ssa.qi + qpi) * dpg;
 
                     const TF qv = qt[ijk] - ssa.ql - ssa.qi;
                     vmr_h2o[ijk_nogc] = qv / (ep<TF> - ep<TF>*qv);
@@ -954,6 +962,7 @@ namespace
             TF* const restrict vmr_h2o, TF* const restrict rh,
             TF* const restrict clwp, TF* const restrict ciwp, TF* const restrict T_sfc,
             const TF* const restrict thl, const TF* const restrict qt, const TF* const restrict thl_bot,
+            const TF* const restrict qsnow, const TF* const restrict qgrpl,
             const TF* const restrict p, const TF* const restrict ph,
             const int* const col_i, const int* const col_j,
             const int n_cols,
@@ -982,8 +991,11 @@ namespace
 
                 const Struct_sat_adjust<TF> ssa = sat_adjust(thl[ijk], qt[ijk], p[k], ex);
 
+                // Frozen precipitation is radiatively active if qs/qg are passed (swqsqg_to_rad).
+                const TF qpi = (qsnow != nullptr) ? qsnow[ijk] + qgrpl[ijk] : TF(0.);
+
                 clwp[ijk_out] = ssa.ql * dpg;
-                ciwp[ijk_out] = ssa.qi * dpg;
+                ciwp[ijk_out] = (ssa.qi + qpi) * dpg;
 
                 const TF qv = qt[ijk] - ssa.ql - ssa.qi;
                 vmr_h2o[ijk_out] = qv / (ep<TF> - ep<TF>*qv);
@@ -1125,6 +1137,11 @@ Thermo_moist<TF>::Thermo_moist(Master& masterin, Grid<TF>& gridin, Fields<TF>& f
 
     // Time variable surface pressure
     tdep_pbot = std::make_unique<Timedep<TF>>(master, grid, "p_sbot", inputin.get_item<bool>("thermo", "swtimedep_pbot", "", false));
+
+    // Add frozen precipitation (qs+qg, swmicro=nsw6) to the radiation cloud ice.
+    // Mimics SCREAM/P3, where the single ice category (all frozen mass) is
+    // radiatively active; rain stays invisible in both models.
+    swqsqg_to_rad = inputin.get_item<bool>("thermo", "swqsqg_to_rad", "", false);
 
     available_masks.insert(available_masks.end(), {"ql", "qlcore", "bplus", "bmin"});
 
@@ -1396,6 +1413,9 @@ void Thermo_moist<TF>::create(
         Column<TF>& column, Cross<TF>& cross, Dump<TF>& dump, Timeloop<TF>& timeloop)
 {
     fields.set_calc_mean_profs(true);
+
+    if (swqsqg_to_rad && !(fields.sp.count("qs") && fields.sp.count("qg")))
+        throw std::runtime_error("swqsqg_to_rad=1 requires prognostic qs and qg (swmicro=nsw6)");
 
     // Process the time dependent surface pressure
     std::string timedep_dim = "time_surface";
@@ -1683,6 +1703,8 @@ void Thermo_moist<TF>::get_radiation_fields(
             T.fld_bot.data(), T.fld_top.data(),  // These 2d fields are used as tmp arrays.
             fields.sp.at("thl")->fld.data(), fields.sp.at("qt")->fld.data(),
             fields.sp.at("thl")->fld_bot.data(),
+            swqsqg_to_rad ? fields.sp.at("qs")->fld.data() : nullptr,
+            swqsqg_to_rad ? fields.sp.at("qg")->fld.data() : nullptr,
             bs.pref.data(), bs.prefh.data(),
             gd.istart, gd.iend,
             gd.jstart, gd.jend,
@@ -1704,6 +1726,8 @@ void Thermo_moist<TF>::get_radiation_fields(
             T.fld_bot.data(), T.fld_top.data(),  // These 2d fields are used as tmp arrays.
             fields.sp.at("thl")->fld.data(), fields.sp.at("qt")->fld.data(),
             fields.sp.at("thl")->fld_bot.data(),
+            swqsqg_to_rad ? fields.sp.at("qs")->fld.data() : nullptr,
+            swqsqg_to_rad ? fields.sp.at("qg")->fld.data() : nullptr,
             bs.pref.data(), bs.prefh.data(),
             gd.istart, gd.iend,
             gd.jstart, gd.jend,
@@ -1735,6 +1759,8 @@ void Thermo_moist<TF>::get_radiation_columns(
             fields.sp.at("thl")->fld.data(),
             fields.sp.at("qt")->fld.data(),
             fields.sp.at("thl")->fld_bot.data(),
+            swqsqg_to_rad ? fields.sp.at("qs")->fld.data() : nullptr,
+            swqsqg_to_rad ? fields.sp.at("qg")->fld.data() : nullptr,
             bs.pref.data(),
             bs.prefh.data(),
             col_i.data(),
