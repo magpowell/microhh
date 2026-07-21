@@ -121,43 +121,81 @@ z = np.linspace(0.5 * dz, zsize - 0.5 * dz, kmax)
 
 # -----------------------------------------------------------------------
 # Parse sounding (t=0 only), large-scale forcing, and surface (validation)
+#
+# The file's own "day" origin is NOT sim t=0 (06:00 LT) -- verified from
+# the sfc file's H/LE diurnal sign pattern (peak at day=0.75, which is
+# only physical for a shallow-Cu day if day=0.000 is 20:00 LT the evening
+# before) and cross-checked independently against snd's surface potential
+# temperature (coolest at day=0.500 = 08:00 LT, warmest at day=0.750 =
+# 14:00 LT -- both physically expected). TIME_OFFSET_SEC shifts the file's
+# clock onto the simulation's: day=0.41667 (between blocks 3 and 4) is the
+# true t=0. day=1.000 then lands exactly on endtime=50400 (14 h), which
+# matches the paper's stated 06-20 LT window -- good confirmation the
+# offset is right, not just the window's duration.
+#
+# Also: z-levels are NOT fixed across time blocks in either file (fixed
+# pressure levels, so z(p) drifts up to ~330 m at the domain top as the
+# thermodynamic profile evolves) -- each block must be interpolated onto
+# the MicroHH z grid using its OWN z-levels, not block 0's.
 # -----------------------------------------------------------------------
 print(f"Reading {SND_FILE}, {LSF_FILE}, {SFC_FILE}...")
 
-snd_days, snd_data = parse_sam_blocks(SND_FILE, ncols=6)   # z,p,tp,q,u,v
-z_snd, p_snd = snd_data[0, :, 0], snd_data[0, :, 1]
-tp_snd, q_snd = snd_data[0, :, 2], snd_data[0, :, 3]
-u_snd, v_snd = snd_data[0, :, 4], snd_data[0, :, 5]
+TIME_OFFSET_SEC = 36000.   # file day=0.000 -> 20:00 LT; sim t=0 (06:00 LT) is 10 h later
 
-thl0 = np.interp(z, z_snd, tp_snd)         # unsaturated t=0 assumption
-qt0  = np.interp(z, z_snd, q_snd) / 1000.  # g/kg -> kg/kg
-u0   = np.interp(z, z_snd, u_snd)
-v0   = np.interp(z, z_snd, v_snd)
+
+def project_blocks(days, data, col):
+    """Interpolate one column onto the MicroHH z grid, block by block,
+    using each block's own z-levels (data[:, :, 0])."""
+    return np.array([np.interp(z, data[b, :, 0], data[b, :, col])
+                      for b in range(len(days))])
+
+
+def blend_to_t0(time_raw, *arrays):
+    """Linearly interpolate each (already z-projected) array to exact
+    t=0 from its two bracketing blocks, then drop everything before t=0
+    and prepend the interpolated t=0 row. Mirrors arm97sd_input.py's
+    interp0 pattern -- MicroHH's Timedep requires time[0] == 0.0 exactly."""
+    i1 = int(np.searchsorted(time_raw, 0.))
+    i0 = i1 - 1
+    w = -time_raw[i0] / (time_raw[i1] - time_raw[i0])
+    time_out = np.concatenate([[0.], time_raw[i1:]])
+    out = []
+    for arr in arrays:
+        row0 = arr[i0] + w * (arr[i1] - arr[i0])
+        out.append(np.concatenate([row0[None], arr[i1:]], axis=0))
+    return (time_out,) + tuple(out)
+
+
+snd_days, snd_data = parse_sam_blocks(SND_FILE, ncols=6)   # z,p,tp,q,u,v
+snd_time_raw = snd_days * 86400. - TIME_OFFSET_SEC
+tp0_raw = project_blocks(snd_days, snd_data, 2)
+q0_raw  = project_blocks(snd_days, snd_data, 3)
+u0_raw  = project_blocks(snd_days, snd_data, 4)
+v0_raw  = project_blocks(snd_days, snd_data, 5)
+_, thl0, qt0_gkg, u0, v0 = blend_to_t0(snd_time_raw, tp0_raw, q0_raw, u0_raw, v0_raw)
+thl0, u0, v0 = thl0[0], u0[0], v0[0]   # blend_to_t0 returns the t=0 row only needed here
+qt0 = qt0_gkg[0] / 1000.               # g/kg -> kg/kg
 
 lsf_days, lsf_data = parse_sam_blocks(LSF_FILE, ncols=7)   # z,p,tls,qls,u,v,w
-time_ls = lsf_days * 86400.                                 # day -> s
+lsf_time_raw = lsf_days * 86400. - TIME_OFFSET_SEC
+thl_ls_raw   = project_blocks(lsf_days, lsf_data, 2)
+qt_ls_raw    = project_blocks(lsf_days, lsf_data, 3)
+u_nudge_raw  = project_blocks(lsf_days, lsf_data, 4)
+v_nudge_raw  = project_blocks(lsf_days, lsf_data, 5)
+w_ls_raw     = project_blocks(lsf_days, lsf_data, 6)
+time_ls, thl_ls, qt_ls, u_nudge, v_nudge, w_ls = blend_to_t0(
+    lsf_time_raw, thl_ls_raw, qt_ls_raw, u_nudge_raw, v_nudge_raw, w_ls_raw)
 n_t = time_ls.size
-z_lsf = lsf_data[0, :, 0]                                   # levels fixed across blocks
 
-thl_ls = np.zeros((n_t, kmax))
-qt_ls  = np.zeros((n_t, kmax))
-w_ls   = np.zeros((n_t, kmax))
-u_nudge = np.zeros((n_t, kmax))
-v_nudge = np.zeros((n_t, kmax))
-for t in range(n_t):
-    thl_ls[t]  = np.interp(z, z_lsf, lsf_data[t, :, 2])
-    qt_ls[t]   = np.interp(z, z_lsf, lsf_data[t, :, 3])
-    u_nudge[t] = np.interp(z, z_lsf, lsf_data[t, :, 4])
-    v_nudge[t] = np.interp(z, z_lsf, lsf_data[t, :, 5])
-    w_ls[t]    = np.interp(z, z_lsf, lsf_data[t, :, 6])
-
-# Surface (validation only -- interactive LSM computes its own H/LE)
+# Surface (validation only -- interactive LSM computes its own H/LE).
+# Not fed into MicroHH, so no need to trim to t>=0 -- shift only, keep the
+# pre-sunrise tail for context in plots.
 sfc_raw = np.loadtxt(SFC_FILE, skiprows=1)
-sfc_time = sfc_raw[:, 0] * 86400.
+sfc_time = sfc_raw[:, 0] * 86400. - TIME_OFFSET_SEC
 sfc_sst, sfc_H, sfc_LE, sfc_TAU = sfc_raw[:, 1], sfc_raw[:, 2], sfc_raw[:, 3], sfc_raw[:, 4]
 
-print(f"  {n_t} forcing times, t = {time_ls[0]:.0f} to {time_ls[-1]:.0f} s; "
-      f"nlev(snd)={len(z_snd)}, nlev(lsf)={len(z_lsf)}")
+print(f"  {n_t} forcing times, t = {time_ls[0]:.0f} to {time_ls[-1]:.0f} s "
+      f"(file day-origin offset by {TIME_OFFSET_SEC:.0f} s)")
 
 # -----------------------------------------------------------------------
 # Reuse goamazon's LS2D/ERA5 background: radiation column, gases, soil
