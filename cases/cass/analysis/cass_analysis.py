@@ -51,26 +51,56 @@ eps_v = 0.608  # R_v/R_d - 1  (virtual-temperature coefficient)
 
 # ── CASS site constants ─────────────────────────────────────────────────────
 CASS_LAT = 36.5    # ARM SGP latitude [deg N]
+CASS_LON = -97.5   # ARM SGP longitude [deg E]
 CASS_DOY = 205     # July 24
 
 # ── Simulation time helpers ──────────────────────────────────────────────────
-LST_OFFSET = 5.5   # simulation t=0 → 05:30 LST
-THETA_REF  = 300.0 # reference potential temperature [K]
+# The canonical analysis time axis is LOCAL APPARENT SOLAR TIME (solar noon =
+# 12.0), NOT local clock time.  `get_local_start()` returns the *clock* start
+# (CDT = UTC-5 at SGP, i.e. sim t=0 → 05:30 clock).  Local apparent solar time
+# differs from the clock by (lon - 15*tz_hours)/15 + equation_of_time:
+#     (-97.5 - 15*(-5)) / 15  -  6.4 min  =  -1.601 h.
+# Verified against the model's own solar zenith angle (`sza` in the radiation
+# stats group): min(sza) — i.e. solar noon — falls at clock 13.60.
+CLOCK_OFFSET = 5.5                            # sim t=0 → 05:30 local clock (CDT)
+SOLAR_CORR_H = -1.601                         # clock → local apparent solar time
+LST_OFFSET   = CLOCK_OFFSET + SOLAR_CORR_H    # = 3.899; sim t=0 → solar 03:54
+THETA_REF    = 300.0                          # reference potential temperature [K]
+
+
+def _local_solar_index(start, t_sec):
+    """Build a tz-naive local-apparent-solar DatetimeIndex from a *clock* start.
+
+    `start` is the local-clock start Timestamp from `get_local_start()`; the
+    returned datetimes are shifted to local apparent solar time so that any axis
+    plotted from them reads in solar time (solar noon = 12:00).
+    """
+    if start is None:
+        return pd.to_datetime(t_sec)
+    base = pd.Timestamp(start) + pd.Timedelta(hours=SOLAR_CORR_H)
+    idx  = pd.to_datetime([base + pd.Timedelta(seconds=float(s)) for s in t_sec])
+    if getattr(idx, "tz", None) is not None:
+        idx = idx.tz_localize(None)
+    return idx
 
 
 def dump_t_to_lst(dump_t_ns):
-    """Convert float64 ns-epoch timestamp to LST hour (scalar)."""
+    """Local apparent solar time (hours) for a ns-epoch timestamp.
+
+    Expects a timestamp drawn from a cass_analysis loader coordinate (already in
+    local apparent solar time), so the hour-of-day is read off directly.
+    """
     ts = pd.Timestamp(int(dump_t_ns), unit='ns')
     return ts.hour + ts.minute / 60.0 + ts.second / 3600.0
 
 
 def sim_time_to_lst(t_sec):
-    """Convert simulation seconds to LST hours."""
+    """Convert simulation seconds to LOCAL APPARENT SOLAR TIME (hours)."""
     return np.asarray(t_sec) / 3600.0 + LST_OFFSET
 
 
 def zenith_angle(lst_h, lat=CASS_LAT, doy=CASS_DOY):
-    """Solar zenith angle [deg] for given LST hour(s)."""
+    """Solar zenith angle [deg]; `lst_h` is LOCAL APPARENT SOLAR TIME (noon=12)."""
     decl  = np.radians(23.45 * np.sin(np.radians(360.0 / 365.0 * (284 + doy))))
     lat_r = np.radians(lat)
     ha    = np.radians(15.0 * (np.asarray(lst_h) - 12.0))
@@ -80,7 +110,7 @@ def zenith_angle(lst_h, lat=CASS_LAT, doy=CASS_DOY):
 
 
 def lst_window_mask(t_sec, lo=11.5, hi=17.0):
-    """Boolean mask for timesteps within an LST window."""
+    """Boolean mask for timesteps within a LOCAL SOLAR TIME window [lo, hi]."""
     lst = sim_time_to_lst(t_sec)
     return (lst >= lo) & (lst <= hi)
 
@@ -193,28 +223,8 @@ def _open_stats_group(path, group):
     return xr.open_dataset(str(path), group=group, decode_times=False)
 
 
-def load_stats(run_dir) -> xr.Dataset:
-    """Load ``cass.default.0000000.nc`` from *run_dir*.
-
-    Returns an xr.Dataset with coordinates (time, t_sec, t_local, z, zh)
-    and data variables from all groups.
-
-    Access pattern is dict-like: ``ds["H"]``, ``ds["qlqi_path"]``, etc.
-
-    Key variables
-    -------------
-    H, LE, G, S, Rnet                 SEB scalars (W m-2)
-    theta                             soil moisture (time, z_soil)
-    qlqi_path, qlqi_cover, ql_cover   cloud scalars
-    zi                                boundary-layer height (m)
-    thl_w, qt_w, thv_w               resolved turbulent flux profiles (time, zh)
-    thl, qt, ql, ql_frac             mean profiles (time, z)
-    sza                               solar zenith angle
-    """
-    run_dir = Path(run_dir)
-    stats_path = run_dir / "cass.default.0000000.nc"
-
-    # Read each group as xr.Dataset
+def _load_stats_segment(stats_path: Path, run_dir: Path) -> xr.Dataset:
+    """Load one ``cass.{mask}.{starttime}.nc`` segment into a unified Dataset."""
     ds_root = xr.open_dataset(str(stats_path), decode_times=False)
     ds_lsm  = _open_stats_group(stats_path, "land_surface")
     ds_rad  = _open_stats_group(stats_path, "radiation")
@@ -225,32 +235,22 @@ def load_stats(run_dir) -> xr.Dataset:
     z  = ds_root["z"].values
     zh = ds_root["zh"].values
 
-    # Build local-time coordinate
     start   = get_local_start(run_dir)
-    t_local = pd.to_datetime(
-        [start + pd.Timedelta(seconds=float(s)) for s in t_sec]
-        if start is not None else t_sec
-    )
-    if hasattr(t_local, "tz") and t_local.tz is not None:
-        t_local = t_local.tz_localize(None)
+    t_local = _local_solar_index(start, t_sec)   # local apparent solar time
 
-    # Radiation scalars: extract surface level
     sw_dn = ds_rad["sw_flux_dn"].isel(zh=0).values
     sw_up = ds_rad["sw_flux_up"].isel(zh=0).values
     lw_dn = ds_rad["lw_flux_dn"].isel(zh=0).values
     lw_up = ds_rad["lw_flux_up"].isel(zh=0).values
 
-    # Assemble into a single Dataset
     out = xr.Dataset(
         data_vars={
-            # Land surface scalars (time,)
             "H":       ("time", ds_lsm["H"].values),
             "LE":      ("time", ds_lsm["LE"].values),
             "G":       ("time", ds_lsm["G"].values),
             "S":       ("time", ds_lsm["S"].values),
             "theta":   (("time", "z_soil"), ds_lsm["theta"].values),
             "ustar":   ("time", ds_lsm["ustar"].values),
-            # Radiation scalars (time,)
             "Rnet":      ("time", (sw_dn - sw_up) + (lw_dn - lw_up)),
             "sw_dn":     ("time", sw_dn),
             "sw_up":     ("time", sw_up),
@@ -258,26 +258,36 @@ def load_stats(run_dir) -> xr.Dataset:
             "lw_up":     ("time", lw_up),
             "sza":       ("time", ds_rad["sza"].values),
             "sw_dn_toa": ("time", ds_rad["sw_flux_dn_toa"].values),
-            # Thermo scalars (time,)
             "qlqi_path":  ("time", ds_thm["qlqi_path"].values),
             "ql_cover":   ("time", ds_thm["ql_cover"].values),
             "qlqi_cover": ("time", ds_thm["qlqi_cover"].values),
             "zi":         ("time", ds_thm["zi"].values),
             "thl_bot":    ("time", ds_thm["thl_bot"].values),
             "qt_bot":     ("time", ds_thm["qt_bot"].values),
-            # Thermo profiles (time, zh)
-            "thl_w": (("time", "zh"), ds_thm["thl_w"].values),
-            "qt_w":  (("time", "zh"), ds_thm["qt_w"].values),
-            "thv_w": (("time", "zh"), ds_thm["thv_w"].values),
-            # Thermo profiles (time, z)
+            "thl_w":    (("time", "zh"), ds_thm["thl_w"].values),
+            "qt_w":     (("time", "zh"), ds_thm["qt_w"].values),
+            "thv_w":    (("time", "zh"), ds_thm["thv_w"].values),
+            # SGS-diffusive and total (resolved+SGS) fluxes — the *_w fields
+            # vanish at the surface by the w=0 BC, so for surface fluxes use *_flux
+            "thl_diff": (("time", "zh"), ds_thm["thl_diff"].values),
+            "qt_diff":  (("time", "zh"), ds_thm["qt_diff"].values),
+            "thv_diff": (("time", "zh"), ds_thm["thv_diff"].values),
+            "thl_flux": (("time", "zh"), ds_thm["thl_flux"].values),
+            "qt_flux":  (("time", "zh"), ds_thm["qt_flux"].values),
+            "thv_flux": (("time", "zh"), ds_thm["thv_flux"].values),
             "thl":     (("time", "z"), ds_thm["thl"].values),
             "qt":      (("time", "z"), ds_thm["qt"].values),
             "ql":      (("time", "z"), ds_thm["ql"].values),
             "ql_frac": (("time", "z"), ds_thm["ql_frac"].values),
-            # Dynamics profiles (time, z)
             "u":   (("time", "z"), ds_dyn["u"].values),
             "v":   (("time", "z"), ds_dyn["v"].values),
             "tke": (("time", "z"), ds_dyn["tke"].values),
+            # vertical-velocity moments on zh (used for w-variance / skewness)
+            "w_2": (("time", "zh"), ds_dyn["w_2"].values),
+            "w_3": (("time", "zh"), ds_dyn["w_3"].values),
+            # virtual-potential-temperature reference profile (z,) — surface
+            # value used as θ_v0 in the convective velocity scale
+            "thvref": (("z",), ds_thm["thvref"].values),
         },
         coords={
             "time":    t_local,
@@ -286,12 +296,61 @@ def load_stats(run_dir) -> xr.Dataset:
             "zh":      zh,
         },
     )
-    # Alias: callers that access ds["t_local"] get the local-time values
     out["t_local"] = ("time", t_local)
-
     for d in (ds_root, ds_lsm, ds_rad, ds_thm, ds_dyn):
         d.close()
     return out
+
+
+def load_stats(run_dir, mask: str = "default") -> xr.Dataset:
+    """Load ``cass.{mask}.NNNNNNN.nc`` segments from *run_dir* and concatenate
+    them along ``time``. Restart runs split stats into multiple files
+    (e.g. ``cass.default.0000000.nc`` + ``cass.default.0043200.nc``); we merge
+    all segments and drop duplicate time points.
+
+    Parameters
+    ----------
+    run_dir : path-like
+        Run directory containing the MicroHH stats files.
+    mask : str
+        Mask-group stats file to open. ``"default"`` reads the full-domain stats
+        (backward compatible). Other values (e.g. ``"couvreux"``, ``"wplus"``)
+        read the same group layout but conditioned on the corresponding mask.
+
+    Returns an xr.Dataset with coordinates (time, t_sec, t_local, z, zh) and
+    data variables from all groups. Access pattern is dict-like:
+    ``ds["H"]``, ``ds["qlqi_path"]``, etc.
+
+    Key variables
+    -------------
+    H, LE, G, S, Rnet                 SEB scalars (W m-2)
+    theta                             soil moisture (time, z_soil)
+    qlqi_path, qlqi_cover, ql_cover   cloud scalars
+    zi                                boundary-layer height (m)
+    thl_w, qt_w, thv_w                resolved turbulent flux profiles (time, zh)
+    thl, qt, ql, ql_frac              mean profiles (time, z)
+    sza                               solar zenith angle
+    """
+    run_dir = Path(run_dir)
+    seg_paths = sorted(run_dir.glob(f"cass.{mask}.[0-9][0-9][0-9][0-9][0-9][0-9][0-9].nc"))
+    if not seg_paths:
+        raise FileNotFoundError(
+            f"No cass.{mask}.NNNNNNN.nc files in {run_dir}"
+        )
+
+    if len(seg_paths) == 1:
+        return _load_stats_segment(seg_paths[0], run_dir)
+
+    parts = [_load_stats_segment(p, run_dir) for p in seg_paths]
+    merged = xr.concat(parts, dim="time")
+    # Restart segments share an overlap window (e.g. seg2 starttime is inside
+    # seg1's time range). MicroHH writes stats with floating-point round-off
+    # in `time`, so 43500.0 in seg1 vs 43499.9999999999 in seg2 are bit-different
+    # and np.unique treats them as distinct. Dedup on integer-rounded t_sec
+    # (stats sampletime is always >= 1 s, so int rounding is safe and exact).
+    t_int = np.rint(merged["t_sec"].values).astype(np.int64)
+    _, uniq_idx = np.unique(t_int, return_index=True)
+    return merged.isel(time=np.sort(uniq_idx))
 
 
 def load_stats_ensemble(rep_dirs: list) -> tuple[xr.Dataset, xr.Dataset]:
@@ -372,6 +431,12 @@ def load_xy_files(run_dir, variables=None, chunks=None) -> xr.Dataset:
             if dim in ds_v.dims and ds_v.sizes[dim] == 1:
                 ds_v = ds_v.squeeze(dim, drop=True)
         ds_v = ds_v.where(ds_v != -1.0e9)
+        # MicroHH preallocates the time axis; skipped frames come back with the
+        # netCDF fill (~9.97e+36) in both `time` and the data, which produces
+        # duplicate time indices and breaks merge alignment downstream.
+        good = ds_v["time"].values < 1.0e30
+        if not good.all():
+            ds_v = ds_v.isel(time=np.where(good)[0])
         datasets.append(ds_v)
 
     if not datasets:
@@ -383,14 +448,10 @@ def load_xy_files(run_dir, variables=None, chunks=None) -> xr.Dataset:
     if "sw_flux_sfc_dir_rt" in ds and "sw_flux_sfc_dif_rt" in ds:
         ds["sw_flux_sfc_rt"] = ds["sw_flux_sfc_dir_rt"] + ds["sw_flux_sfc_dif_rt"]
 
-    # Local-time coordinate
+    # Local-time coordinate (local apparent solar time)
     start = get_local_start(run_dir)
     if start is not None:
-        t_local = pd.to_datetime(
-            [start + pd.Timedelta(seconds=float(s)) for s in ds.time.values]
-        )
-        if t_local.tz is not None:
-            t_local = t_local.tz_localize(None)
+        t_local = _local_solar_index(start, ds.time.values)
         ds = ds.assign_coords(time=("time", t_local))
 
     return ds
@@ -423,10 +484,21 @@ def conditioned_means_ensemble(rep_dirs: list, variables=None) -> tuple[dict, di
     per_rep = []
     for d in rep_dirs:
         ds = load_xy_files(d, vars_to_load + ["qlqi_path"], chunks={"time": 200})
+        # Loudly refuse to silently drop variables that didn't load — that was
+        # the silent-failure mode that produced partial cache pickles.
+        missing = [v for v in variables if v not in ds]
+        if missing:
+            raise KeyError(
+                f"conditioned_means_ensemble: variable(s) {missing!r} were "
+                f"requested but not present in xy dataset for {d}. "
+                f"Likely cause: corresponding `.xy.nc` files have not been "
+                f"generated yet — run `cross_to_nc.py -v {' '.join(missing)}` "
+                f"in that rep dir (or via a batch convert)."
+            )
         mask = ds["qlqi_path"] > 0
-        shaded_means   = {v: ds[v].where(mask).mean(["x", "y"])  for v in variables if v in ds}
-        unshaded_means = {v: ds[v].where(~mask).mean(["x", "y"]) for v in variables if v in ds}
-        domain_means   = {v: ds[v].mean(["x", "y"])              for v in variables if v in ds}
+        shaded_means   = {v: ds[v].where(mask).mean(["x", "y"])  for v in variables}
+        unshaded_means = {v: ds[v].where(~mask).mean(["x", "y"]) for v in variables}
+        domain_means   = {v: ds[v].mean(["x", "y"])              for v in variables}
         per_rep.append({"shaded": shaded_means, "unshaded": unshaded_means, "domain": domain_means})
 
     first_var = list(per_rep[0]["shaded"])[0]
@@ -451,7 +523,7 @@ def conditioned_means_ensemble(rep_dirs: list, variables=None) -> tuple[dict, di
 # 3D dump loading  (requires 3d_to_nc.py to have been run first)
 # ══════════════════════════════════════════════════════════════════════════════
 
-_3D_VARS_DEFAULT = ["thl", "qt", "ql", "w", "b"]
+_3D_VARS_DEFAULT = ["thl", "qt", "ql", "w", "b", "couvreux"]
 _3D_VARS_CIRC    = ["thl", "qt", "ql", "w", "b", "u", "v"]
 
 
@@ -518,14 +590,10 @@ def load_3d_nc(run_dir, variables=None, chunks=None) -> xr.Dataset:
     if "ql" in ds:
         ds["cloud_3d"] = ds["ql"] > 0
 
-    # Local-time coordinate
+    # Local-time coordinate (local apparent solar time)
     start = get_local_start(run_dir)
     if start is not None:
-        t_local = pd.to_datetime(
-            [start + pd.Timedelta(seconds=float(s)) for s in ds.time.values]
-        )
-        if t_local.tz is not None:
-            t_local = t_local.tz_localize(None)
+        t_local = _local_solar_index(start, ds.time.values)
         ds = ds.assign_coords(time=("time", t_local))
 
     return ds
@@ -584,15 +652,17 @@ def compute_z_sl(stats, time_idx: int = -1) -> float:
     is dominated by the sponge layer near the domain top — not physically meaningful.
     Cloud base (first ql_frac > 0) correctly identifies the subcloud layer top.
     """
-    ql_frac = stats["ql_frac"][time_idx]   # (nz,)
-    z       = stats["z"]                   # (nz,)
-    idx = np.argmax(ql_frac > 0)
+    # Extract as numpy arrays — np.argmax on an xarray DataArray triggers a
+    # numpy/xarray __array_wrap__ incompatibility on newer numpy versions.
+    ql_frac = np.asarray(stats["ql_frac"][time_idx])   # (nz,)
+    z       = np.asarray(stats["z"])                   # (nz,)
+    idx = int(np.argmax(ql_frac > 0))
     if ql_frac[idx] == 0:
         # No cloud present — fall back to domain-mean thv_w minimum below 4 km
-        thv_w = stats["thv_w"][time_idx]
-        zh    = stats["zh"]
+        thv_w = np.asarray(stats["thv_w"][time_idx])
+        zh    = np.asarray(stats["zh"])
         mask  = zh < 4000.0
-        idx   = np.argmin(thv_w[mask])
+        idx   = int(np.argmin(thv_w[mask]))
         return float(zh[idx])
     return float(z[idx])
 
@@ -891,8 +961,8 @@ def plot_flux_conditioned(ax, t_local, shaded_mean, unshaded_mean,
     sm    = np.asarray(shaded_mean) * scale
     um    = np.asarray(unshaded_mean) * scale
     t_num = _to_plottime(t_local)
-    ax.plot(t_num, sm, color="steelblue",  ls=ls, label="cloud-root")
-    ax.plot(t_num, um, color="darkorange", ls=ls, label="cloud-free")
+    ax.plot(t_num, sm, color="steelblue",  ls=ls, label="cloud covered")
+    ax.plot(t_num, um, color="darkorange", ls=ls, label="cloud free")
     if shaded_std is not None:
         _shade_ensemble(ax, t_local, sm, np.asarray(shaded_std) * scale, "steelblue")
     if unshaded_std is not None:

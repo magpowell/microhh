@@ -1,7 +1,8 @@
-"""Generate cs_veg_comparison.ipynb, soil_moisture_comparison.ipynb, wind_u_comparison.ipynb, wind_geo_comparison.ipynb.
+"""Generate sweep comparison notebooks.
 
 Usage: python _gen_sweep_notebooks.py [group1 group2 ...]
-If no groups given, regenerates all four. Valid groups: cs_veg, soil_moisture, wind_u, wind_geo.
+If no groups given, regenerates all. Valid groups: cs_veg, soil_moisture,
+wind_u, wind_geo, rs_scale.
 """
 
 import json
@@ -9,7 +10,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).parent
-_ALL_GROUPS = ("cs_veg", "soil_moisture", "wind_u", "wind_geo")
+_ALL_GROUPS = ("cs_veg", "soil_moisture", "wind_u", "wind_geo", "rs_scale")
 _TARGETS = set(sys.argv[1:]) if len(sys.argv) > 1 else set(_ALL_GROUPS)
 
 
@@ -404,6 +405,146 @@ _savefig(f"{SWEEP_GROUP}_seb_components.pdf", bbox_inches="tight")
 plt.show()
 """
 
+SEB_SCISSOR_LOAD = """\
+# ── Load cloud-conditioned SEB caches per sweep value ────────────────────────
+# Mirrors base_comparison.ipynb. Caches at CASS_ROOT/analysis/seb_cache/
+# experiments_<key>__<rt>.pkl. Computes on the fly if missing (slow first time —
+# can be pre-built with: python compute_seb_cache.py --expt <key> --rt both).
+from cass_analysis import conditioned_means_ensemble
+
+_SEB_CACHE = CASS_ROOT / "analysis" / "seb_cache"
+_SEB_CACHE.mkdir(parents=True, exist_ok=True)
+
+_VARS_2S = ["thl_fluxbot", "qt_fluxbot", "sw_flux_dn",
+            "lw_flux_dn", "lw_flux_up"]
+_VARS_RT = ["thl_fluxbot", "qt_fluxbot", "sw_flux_sfc_rt", "sw_flux_dn",
+            "lw_flux_dn", "lw_flux_up"]
+
+def _materialise_cond(result):
+    mean_d, std_d = result
+    for d in (mean_d, std_d):
+        for kind in d:
+            d[kind] = {var: da.compute() for var, da in d[kind].items()}
+    return mean_d, std_d
+
+def _load_or_compute_cond(rep_dirs, cache_name, variables, force=False):
+    cache_file = _SEB_CACHE / f"{cache_name}.pkl"
+    needed = set(variables)
+    if not force and cache_file.exists():
+        with open(cache_file, "rb") as fh:
+            cached = pickle.load(fh)
+        if "domain" in cached[0] and needed.issubset(cached[0]["domain"].keys()):
+            print(f"  [cache hit] {cache_file.name}")
+            return cached
+        print(f"  [stale] {cache_file.name} — recomputing")
+    print(f"  [computing] {cache_name} … (slow first time)")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = _materialise_cond(conditioned_means_ensemble(rep_dirs, variables=variables))
+    with open(cache_file, "wb") as fh:
+        pickle.dump(result, fh)
+    print(f"  [cached]    {cache_file.name}")
+    return result
+
+cond_data = {}  # key -> {cm2, cs2, cmr, csr}
+for key in available:
+    d = data[key]
+    cm2, cs2 = _load_or_compute_cond(
+        d["dirs_2s"], f"experiments_{key}__2stream", _VARS_2S
+    )
+    if d["dirs_rt"]:
+        cmr, csr = _load_or_compute_cond(
+            d["dirs_rt"], f"experiments_{key}__raytracer", _VARS_RT
+        )
+    else:
+        cmr = csr = None
+    cond_data[key] = dict(cm2=cm2, cs2=cs2, cmr=cmr, csr=csr)
+
+print(f"\\nLoaded conditioned SEB for {len(cond_data)} sweep values.")
+"""
+
+SEB_SCISSOR_PLOT = """\
+# ── Sweep scissor: (cloud-covered − domain mean) / domain mean × 100 ────────
+# Rows: 1D (top), 3D (bottom).  Cols: Rnet, H, LE.  Curves coloured by sweep value.
+# Rnet = (1 - albedo)·SW↓ + LW↓ - LW↑;  albedo = 0.20.
+ALBEDO = 0.20
+H_scale  = rho * cp
+LE_scale = rho * Lv
+
+def _frac_anomaly(cc, dm, frac=0.05):
+    cc, dm = np.asarray(cc), np.asarray(dm)
+    peak = np.nanmax(np.abs(dm))
+    mask = np.abs(dm) > frac * peak if peak > 0 else np.ones_like(dm, bool)
+    pct = np.full_like(dm, np.nan, dtype=float)
+    pct[mask] = (cc[mask] - dm[mask]) / dm[mask] * 100.0
+    return pct
+
+def _resolve(cm, key_rt, key_fb):
+    return key_rt if key_rt in cm["shaded"] else key_fb
+
+def _rnet_cc_dm(cm, sw_key):
+    sw_cc  = np.asarray(cm["shaded"][sw_key]);       sw_dm  = np.asarray(cm["domain"][sw_key])
+    lwd_cc = np.asarray(cm["shaded"]["lw_flux_dn"]); lwd_dm = np.asarray(cm["domain"]["lw_flux_dn"])
+    lwu_cc = np.asarray(cm["shaded"]["lw_flux_up"]); lwu_dm = np.asarray(cm["domain"]["lw_flux_up"])
+    rn_cc = (1 - ALBEDO) * sw_cc + lwd_cc - lwu_cc
+    rn_dm = (1 - ALBEDO) * sw_dm + lwd_dm - lwu_dm
+    return rn_cc, rn_dm
+
+fig, axes = plt.subplots(2, 3, figsize=(15, 7), sharex=True, sharey=True)
+
+col_titles = [r"R$_\\mathrm{net}$", "H", "LE"]
+rt_rows = [("1D", "cm2"), ("3D", "cmr")]
+
+for row, (rt_lbl, cm_key) in enumerate(rt_rows):
+    for col in range(3):
+        ax = axes[row, col]
+        for key in available:
+            cd = cond_data.get(key)
+            if cd is None or cd[cm_key] is None:
+                continue
+            cm     = cd[cm_key]
+            sw_key = _resolve(cm, "sw_flux_sfc_rt", "sw_flux_dn")
+            t      = cm["shaded"]["thl_fluxbot"].time.values
+            t_plot = _to_plottime(t)
+            if col == 0:
+                rn_cc, rn_dm = _rnet_cc_dm(cm, sw_key)
+                pct = _frac_anomaly(rn_cc, rn_dm)
+            elif col == 1:
+                pct = _frac_anomaly(np.asarray(cm["shaded"]["thl_fluxbot"]) * H_scale,
+                                    np.asarray(cm["domain"]["thl_fluxbot"]) * H_scale)
+            else:
+                pct = _frac_anomaly(np.asarray(cm["shaded"]["qt_fluxbot"]) * LE_scale,
+                                    np.asarray(cm["domain"]["qt_fluxbot"]) * LE_scale)
+            ax.plot(t_plot, pct, color=COLORS[key], lw=1.5, label=LABELS[key])
+        ax.axhline(0, color="gray", lw=0.5, ls="--")
+        if row == 0:
+            ax.set_title(col_titles[col], fontsize=12, fontweight="bold")
+        if row == 1:
+            ax.set_xlabel("LST (h)")
+        ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H"))
+        ax.set_ylim(-100, 100)
+
+# Row labels
+for row, (rt_lbl, _) in enumerate(rt_rows):
+    axes[row, 0].annotate(
+        rt_lbl, xy=(-0.25, 0.5), xycoords="axes fraction",
+        fontsize=13, fontweight="bold", ha="center", va="center",
+    )
+
+axes[0, 0].set_ylabel("(cc − dm) / dm  (%)")
+axes[1, 0].set_ylabel("(cc − dm) / dm  (%)")
+
+# Single legend on the right
+handles, labels = axes[0, 0].get_legend_handles_labels()
+fig.legend(handles, labels, loc="center right", bbox_to_anchor=(1.05, 0.5),
+           fontsize=9, frameon=False, title=f"{SWEEP_GROUP}  ({PARAM_UNIT})")
+
+fig.tight_layout(rect=[0.03, 0, 0.92, 1])
+_savefig(f"{SWEEP_GROUP}_seb_scissor.pdf", bbox_inches="tight")
+plt.show()
+"""
+
 SEB_BO = """\
 # ── Bowen ratio: timeseries + vs sweep param ─────────────────────────────────
 fig, (ax_bo, ax_bar) = plt.subplots(1, 2, figsize=(12, 4))
@@ -653,11 +794,71 @@ wg_cells = [
     md("---\n## 3. Surface energy balance"),
     code(SEB_SECTION),
     code(SEB_BO),
+    md("---\n## 4. Cloud-conditioned SEB (scissor)"),
+    code(SEB_SCISSOR_LOAD),
+    code(SEB_SCISSOR_PLOT),
 ]
 
 if "wind_geo" in _TARGETS:
     with open(HERE / "wind_geo_comparison.ipynb", "w") as f:
         json.dump(nb(wg_cells), f, indent=1)
     print("Wrote wind_geo_comparison.ipynb")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# rs_scale_comparison.ipynb
+# ══════════════════════════════════════════════════════════════════════════════
+
+rs_header = """\
+# rs_scale sweep — comprehensive analysis
+
+Surface-resistance multiplier sweep (`[land_surface] rs_scale` in cass.ini).
+Bowen-ratio knob: `f_{r_s} > 1` dries the surface (larger Bo, more H, less LE);
+`f_{r_s} < 1` wets it.  All runs: aerosols off, zero wind.
+
+| Key | f_{r_s} | Note |
+|-----|--------|------|
+| `rs_scale_0p25` | 0.25 | most evaporation, lowest Bo |
+| `rs_scale_0p5`  | 0.5  | |
+| `rs_scale_1`    | 1.0  | reference (aliases no_aerosols_zero_wind) |
+| `rs_scale_2`    | 2.0  | |
+| `rs_scale_4`    | 4.0  | most resistance, highest Bo |
+
+**Sections**
+1. LWP overview
+2. Thermodynamic structure
+3. Surface energy balance
+4. Cloud-conditioned SEB (scissor)
+"""
+
+rs_config = config_cell(
+    group="rs_scale",
+    title="rs_scale",
+    param_unit=r"$\\times$",
+)
+
+rs_cells = [
+    md(rs_header),
+    code(IMPORTS),
+    rs_config,
+    md("---\n## Data loading"),
+    code(DATA_LOAD),
+    md("---\n## 1. LWP overview"),
+    code(LWP_SUMMARY),
+    md("---\n## 2. Thermodynamic structure"),
+    code(THERMO_TIMEH),
+    code(THERMO_PROFILES),
+    md("---\n## 3. Surface energy balance"),
+    code(SEB_SECTION),
+    code(SEB_BO),
+    md("---\n## 4. Cloud-conditioned SEB (scissor)"),
+    code(SEB_SCISSOR_LOAD),
+    code(SEB_SCISSOR_PLOT),
+]
+
+if "rs_scale" in _TARGETS:
+    with open(HERE / "rs_scale_comparison.ipynb", "w") as f:
+        json.dump(nb(rs_cells), f, indent=1)
+    print("Wrote rs_scale_comparison.ipynb")
 
 print("\nAll done.")

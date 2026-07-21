@@ -94,13 +94,13 @@ done
 tmp=$(mktemp /tmp/entrainment_XXXXXX.sh)
 cat > "$tmp" <<HEADER
 #!/bin/bash
-#SBATCH --qos=debug
+#SBATCH --qos=regular
 #SBATCH --constraint=cpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=256G
-#SBATCH --time=00:29:00
+#SBATCH --time=01:00:00
 #SBATCH --job-name=entr_${EXPT}
 #SBATCH --output=${LOG_DIR}/entr_${EXPT}-%j.out
 #SBATCH --error=${LOG_DIR}/entr_${EXPT}-%j.err

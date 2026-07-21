@@ -1,17 +1,32 @@
 #!/usr/bin/env python3
 """
-Set up CASS no_aerosols_zero_wind experiment run directories.
+Set up CASS wind_sun experiment run directories.
 
 Creates:
-  $SCRATCH/CASS_LES/experiments/no_aerosols_zero_wind/{2stream,raytracer}/rep_{01..04}/
+  $SCRATCH/CASS_LES/experiments/wind_sun/{2stream,raytracer}/rep_{01..04}/
 
-Aerosols off, zero winds. Dual purpose:
-  1. Direct science: zero-wind 2stream vs raytracer LWP differences.
-  2. Source of nudge profiles for the mean_state_nudge experiment
-     (extract from 2stream column output after these runs complete).
+Wind prescription:
+  Target wind vector magnitude U = 5 m/s, direction = anti-solar (cloud
+  advected toward its shadow), rotating with the solar azimuth through the
+  diurnal cycle. Solar position computed from cass.ini lat/lon for day
+  205.5 (July 24, 12:00 UTC at SGP = ~07:00 LST CDT).
+
+  - u_nudge[t,z] = -U sin(phi_s(t))   uniform in z
+  - v_nudge[t,z] = -U cos(phi_s(t))   uniform in z
+  - u_geo, v_geo identical to u_nudge, v_nudge (Coriolis tendency ~ 0 when
+    BL wind matches the prescription).
+  - nudge timescale tau = 1800 s (constant in z) — strong enough to track
+    16 deg/h azimuth rotation with ~8 deg lag.
+  - time_ls resampled to 600 s spacing inside cass_input.py.
+
+INI overlays on top of base:
+  [aerosol]  swaerosol      = false
+  [force]    swtimedep_geo  = true
+
+cass_input.py is called with --sun-wind 5.0 --nudge-timescale 1800.
 
 Usage:
-  python setup_no_aerosols_zero_wind.py [--dry-run] [--debug]
+  python setup_wind_sun.py [--dry-run] [--debug]
 """
 
 import argparse
@@ -25,12 +40,13 @@ MICROHH_DIR  = Path("/global/homes/m/mpowell/repos/microhh")
 CASS_DIR     = MICROHH_DIR / "cases" / "cass"
 SHARED_DIR   = CASS_DIR / "shared"
 SCRATCH      = Path(os.environ.get("SCRATCH", "/pscratch/sd/m/mpowell"))
-EXP_SCRATCH  = SCRATCH / "CASS_LES" / "experiments" / "no_aerosols_zero_wind_v2"
+EXP_SCRATCH  = SCRATCH / "CASS_LES" / "experiments" / "wind_sun"
 
 RADS = ["2stream", "raytracer"]
 REPS = [1, 2, 3, 4]
 
-DEBUG_GRID = {"itot": "64", "jtot": "64", "xsize": "6400.", "ysize": "6400."}
+WIND_MAGNITUDE  = 5.0       # m/s
+NUDGE_TIMESCALE = 1800.0    # s
 
 RADIATION_FILES = {
     "coefficients_lw.nc":       MICROHH_DIR / "rte-rrtmgp-cpp" / "rrtmgp-data" / "rrtmgp-gas-lw-g128.nc",
@@ -56,6 +72,8 @@ CASE_DATA = [
     "cass_cams_composite.nc",
     "van_genuchten_parameters.nc",
 ]
+
+DEBUG_GRID = {"itot": "64", "jtot": "64", "xsize": "6400.", "ysize": "6400."}
 
 
 def symlink(src: Path, dst: Path, dry_run: bool):
@@ -83,41 +101,7 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False) -> configparser.Config
     ])
     cfg.set("fields", "rndseed", str(rndseed))
     cfg.set("aerosol", "swaerosol", "false")
-    # Add evisc to 3D dumps for SGS flux correction in cloud-root composites
-    dumplist = cfg.get("dump", "dumplist")
-    if "evisc" not in dumplist:
-        cfg.set("dump", "dumplist", dumplist + ",evisc")
-    # Couvreux (2010) passive tracer for updraft conditional sampling.
-    # Tracer-only mask in-model; AND with w>0, ql>0 offline in xarray.
-    slist = cfg.get("fields", "slist", fallback="").strip()
-    if "couvreux" not in slist:
-        cfg.set("fields", "slist", (slist + "," if slist else "") + "couvreux")
-    # per-scalar surface-flux BC (magnitude arbitrary; mask uses relative threshold).
-    # Value 1e-5 matches the LASSO / BOMEX convention in the MicroHH repo.
-    cfg.set("boundary", "sbcbot[couvreux]", "flux")
-    cfg.set("boundary", "sbot[couvreux]",   "1e-5")
-    cfg.set("boundary", "sbctop[couvreux]", "neumann")
-    cfg.set("boundary", "stop[couvreux]",   "0.")
-    # Exponential relaxation sink. tau = 900 s (paper canonical; Couvreux 2010 BLM 134).
-    # nstd_couvreux = 1 is paper canonical; LASSO uses 3 to compensate for the absent
-    # sigma_min floor in MicroHH's Decay::get_mask -- revisit if mask is noisy aloft.
-    if not cfg.has_section("decay"):
-        cfg.add_section("decay")
-    cfg.set("decay", "swdecay[couvreux]", "exponential")
-    cfg.set("decay", "timescale",         "900.")
-    cfg.set("decay", "nstd_couvreux",     "1.")
-    # register couvreux/wplus/ql masks for conditional stats. Do NOT add "default" --
-    # stats.cxx:561 auto-appends it, and listing it explicitly produces a duplicate
-    # that leaves domain-mean stats (ql_cover, qlqi_path, thl, qt, ...) all zero/NaN.
-    masklist = cfg.get("stats", "masklist", fallback="")
-    for m in ("couvreux", "wplus", "ql"):
-        if m not in masklist:
-            masklist += ("," if masklist else "") + m
-    cfg.set("stats", "masklist", masklist)
-    # include couvreux in 3D dumps for cell-exact offline masking
-    dumplist = cfg.get("dump", "dumplist")
-    if "couvreux" not in dumplist:
-        cfg.set("dump", "dumplist", dumplist + ",couvreux")
+    cfg.set("force", "swtimedep_geo", "true")
     if debug:
         for k, v in DEBUG_GRID.items():
             cfg.set("grid", k, v)
@@ -132,20 +116,20 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False) -> configparser.Config
 
 
 def setup_rep(rt: str, rep: int, dry_run: bool, debug: bool = False):
-    run_root = SCRATCH / "CASS_LES" / "debug" / "no_aerosols_zero_wind" if debug else EXP_SCRATCH
+    run_root = SCRATCH / "CASS_LES" / "debug" / "wind_sun" if debug else EXP_SCRATCH
     run_dir = run_root / rt / f"rep_{rep:02d}"
-    print(f"\n--- no_aerosols_zero_wind/{rt}/rep_{rep:02d} ---")
+    print(f"\n--- {rt}/rep_{rep:02d} ---")
 
     if not dry_run:
         run_dir.mkdir(parents=True, exist_ok=True)
 
     cfg = merge_ini(rndseed=rep, rt=rt, debug=debug)
     if dry_run:
-        print(f"  [dry] write cass.ini  (rndseed={rep}, swaerosol=false, zero winds)")
+        print(f"  [dry] write cass.ini (rndseed={rep})")
     else:
         with open(run_dir / "cass.ini", "w") as f:
             cfg.write(f)
-        print(f"  wrote cass.ini  (rndseed={rep}, swaerosol=false, zero winds)")
+        print(f"  wrote cass.ini (rndseed={rep})")
 
     symlink(MICROHH_DIR / "build_gpu" / "microhh", run_dir / "microhh", dry_run)
 
@@ -158,17 +142,15 @@ def setup_rep(rt: str, rep: int, dry_run: bool, debug: bool = False):
     for name in CASE_DATA:
         symlink(SHARED_DIR / "data" / name, run_dir / name, dry_run)
 
+    cmd = [sys.executable, "cass_input.py",
+           "--sun-wind", str(WIND_MAGNITUDE),
+           "--nudge-timescale", str(NUDGE_TIMESCALE)]
     if dry_run:
-        print("  [dry] python cass_input.py --zero-winds")
+        print(f"  [dry] {' '.join(cmd[1:])}")
         return
 
-    print("  running cass_input.py --zero-winds ...")
-    result = subprocess.run(
-        [sys.executable, "cass_input.py", "--zero-winds"],
-        cwd=run_dir,
-        capture_output=True,
-        text=True,
-    )
+    print(f"  running cass_input.py --sun-wind {WIND_MAGNITUDE} --nudge-timescale {NUDGE_TIMESCALE} ...")
+    result = subprocess.run(cmd, cwd=run_dir, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"  ERROR: cass_input.py failed:\n{result.stderr[-2000:]}")
         sys.exit(1)
@@ -183,20 +165,20 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="Print actions without executing")
     parser.add_argument("--debug", action="store_true",
-                        help="64x64 grid, rep_01 only, scratch under CASS_LES/debug/no_aerosols_zero_wind/")
+                        help="64x64 grid, rep_01 only, scratch under CASS_LES/debug/wind_sun/")
     args = parser.parse_args()
 
     reps = [1] if args.debug else REPS
-    run_root = SCRATCH / "CASS_LES" / "debug" / "no_aerosols_zero_wind" if args.debug else EXP_SCRATCH
-    print(f"Setting up no_aerosols_zero_wind runs in: {run_root}")
+    run_root = SCRATCH / "CASS_LES" / "debug" / "wind_sun" if args.debug else EXP_SCRATCH
+    print(f"Setting up wind_sun experiment runs in: {run_root}")
     if args.dry_run:
         print("(dry run — no changes will be made)\n")
 
     for rt in RADS:
         for rep in reps:
-            setup_rep(rt, rep, args.dry_run, args.debug)
+            setup_rep(rt, rep, args.dry_run, debug=args.debug)
 
-    print("\nDone. Run submit_no_aerosols_zero_wind.sh to launch the jobs.")
+    print(f"\nDone. Run submit_wind_sun.sh to launch the jobs.")
 
 
 if __name__ == "__main__":

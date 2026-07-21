@@ -1,0 +1,3 @@
+# Slurm job logs -- not source, don't commit
+mhh-*.out
+mhh-*.err

@@ -58,18 +58,36 @@ ALL_EXPERIMENTS: dict[str, dict] = {
         color  = "C0",
     ),
     # ── no_aerosols_zero_wind ─────────────────────────────────────────────────
+    # As of 2026-05, this key points at the v2 dataset (which now includes the
+    # Couvreux passive tracer + SGS-flux split + extended sim to LST 19:20).
+    # The v1 path (`experiments/no_aerosols_zero_wind`) is pending HPSS archive.
     "no_aerosols_zero_wind": dict(
         label  = "No aerosols, zero wind",
-        root   = CASS_ROOT / "experiments/no_aerosols_zero_wind",
+        root   = CASS_ROOT / "experiments/no_aerosols_zero_wind_v2",
         group  = "aerosol",
         color  = "C1",
+    ),
+    # Explicit v2 alias, kept so cells that reference V2_EXPT directly still resolve.
+    "no_aerosols_zero_wind_v2": dict(
+        label  = "No aerosols, zero wind",
+        root   = CASS_ROOT / "experiments/no_aerosols_zero_wind_v2",
+        group  = "aerosol",
+        color  = "C1",
+    ),
+    # Explicit v1 alias — same physics minus the Couvreux passive tracer.
+    # Kept on scratch only until HPSS archive; used for v1↔v2 sanity comparisons.
+    "no_aerosols_zero_wind_v1": dict(
+        label  = "No aerosols, zero wind (v1, no tracer)",
+        root   = CASS_ROOT / "experiments/no_aerosols_zero_wind",
+        group  = "aerosol",
+        color  = "C7",
     ),
     # ── wind_geo (geostrophic wind sweep) ─────────────────────────────────────
     # u_g = 0 reference: aliases no_aerosols_zero_wind data root so it shows up
     # in list_group("wind_geo") as the starting point.
     "wind_geo_0": dict(
         label  = r"$u_g = 0\,\mathrm{m\,s^{-1}}$",
-        root   = CASS_ROOT / "experiments/no_aerosols_zero_wind",
+        root   = CASS_ROOT / "experiments/no_aerosols_zero_wind_v2",  # baseline → v2
         group  = "wind_geo",
         param  = 0.0,
         color  = "#dadaeb",
@@ -101,6 +119,54 @@ ALL_EXPERIMENTS: dict[str, dict] = {
         group  = "wind_geo",
         param  = 10.0,
         color  = "#3f007d",
+    ),
+    # ── wind_sun (U=5 wind whose direction tracks the solar azimuth, so ───────
+    # clouds advect toward their own shadows). Standalone: same 5 m/s speed as
+    # wind_geo_5p0 but shadow-tracking direction — its own group.
+    "wind_sun": dict(
+        label  = r"wind_sun ($U=5\,\mathrm{m\,s^{-1}}$, $\odot$-tracking)",
+        root   = CASS_ROOT / "experiments/wind_sun",
+        group  = "wind_sun",
+        param  = 5.0,
+        color  = "C1",
+    ),
+    # ── rs_scale (surface-resistance multiplier; Bowen-ratio sweep) ───────────
+    # rs_scale = 1.0 reference: aliases no_aerosols_zero_wind data root so the
+    # sweep has a baseline anchor (rs_scale=1 is the default, no scaling).
+    "rs_scale_0p25": dict(
+        label  = r"$f_{r_s} = 0.25$",
+        root   = CASS_ROOT / "experiments/rs_scale/rs_0p25",
+        group  = "rs_scale",
+        param  = 0.25,
+        color  = "#c7e9c0",
+    ),
+    "rs_scale_0p5": dict(
+        label  = r"$f_{r_s} = 0.5$",
+        root   = CASS_ROOT / "experiments/rs_scale/rs_0p5",
+        group  = "rs_scale",
+        param  = 0.5,
+        color  = "#a1d99b",
+    ),
+    "rs_scale_1": dict(
+        label  = r"$f_{r_s} = 1$",
+        root   = CASS_ROOT / "experiments/no_aerosols_zero_wind_v2",  # baseline → v2
+        group  = "rs_scale",
+        param  = 1.0,
+        color  = "#74c476",
+    ),
+    "rs_scale_2": dict(
+        label  = r"$f_{r_s} = 2$",
+        root   = CASS_ROOT / "experiments/rs_scale/rs_2",
+        group  = "rs_scale",
+        param  = 2.0,
+        color  = "#31a354",
+    ),
+    "rs_scale_4": dict(
+        label  = r"$f_{r_s} = 4$",
+        root   = CASS_ROOT / "experiments/rs_scale/rs_4",
+        group  = "rs_scale",
+        param  = 4.0,
+        color  = "#006d2c",
     ),
 }
 

@@ -26,6 +26,15 @@ parser.add_argument('--qt-ls', type=float, default=None,
                     help='Replace qt_ls with a constant profile: VALUE (g kg-1 day-1) '
                          'below 2000 m, zero above, constant in time. '
                          'Overrides the CASS composite qt_ls entirely.')
+parser.add_argument('--sun-wind', type=float, default=None, metavar='U',
+                    help='Wind direction tracks the sun: target wind vector points in the '
+                         'anti-solar horizontal direction (cloud advected toward its shadow) '
+                         'with magnitude U (m/s). Writes time-dependent u_nudge, v_nudge, '
+                         'u_geo, v_geo on a resampled (600 s) time_ls. '
+                         'Requires [force] swtimedep_geo=true in cass.ini. '
+                         'Mutually exclusive with --zero-winds, --wind-u, --geo-wind.')
+parser.add_argument('--nudge-timescale', type=float, default=10800., metavar='SECONDS',
+                    help='Nudging timescale for u,v (s). Default: 10800 (3 h).')
 args = parser.parse_args()
 
 if args.wind_u is not None and args.zero_winds:
@@ -34,8 +43,39 @@ if args.geo_wind is not None and args.zero_winds:
     parser.error("--geo-wind and --zero-winds are mutually exclusive")
 if args.geo_wind is not None and args.wind_u is not None:
     parser.error("--geo-wind and --wind-u are mutually exclusive")
+if args.sun_wind is not None and (args.zero_winds or args.wind_u is not None or args.geo_wind is not None):
+    parser.error("--sun-wind is mutually exclusive with --zero-winds, --wind-u, --geo-wind")
 
 float_type = "f8"
+
+
+def solar_azimuth_deg(t_sec, lat_deg, lon_deg, doy_start=205, hour_utc_start=12.0):
+    """Solar azimuth (deg from N, clockwise) at simulation time t_sec.
+
+    NOAA Solar Position Algorithm (simplified; accurate to ~0.5 deg).
+    For CASS: t=0 corresponds to day 205.5 = July 24, 12:00 UTC, so
+    defaults doy_start=205 and hour_utc_start=12.0 are correct. Accepts
+    scalar or numpy array t_sec.
+    """
+    hour_utc_cont = hour_utc_start + np.asarray(t_sec, dtype=float) / 3600.0
+    doy_cont = doy_start + hour_utc_cont / 24.0
+    gamma = 2.0 * np.pi / 365.0 * (doy_cont - 1.0)
+    eqtime = 229.18 * (0.000075
+                       + 0.001868 * np.cos(gamma)
+                       - 0.032077 * np.sin(gamma)
+                       - 0.014615 * np.cos(2.0 * gamma)
+                       - 0.040849 * np.sin(2.0 * gamma))
+    decl = (0.006918
+            - 0.399912 * np.cos(gamma) + 0.070257 * np.sin(gamma)
+            - 0.006758 * np.cos(2.0 * gamma) + 0.000907 * np.sin(2.0 * gamma)
+            - 0.002697 * np.cos(3.0 * gamma) + 0.00148 * np.sin(3.0 * gamma))
+    hour_utc = hour_utc_cont % 24.0
+    tst = hour_utc * 60.0 + eqtime + 4.0 * lon_deg
+    ha = np.radians(tst / 4.0 - 180.0)
+    lat = np.radians(lat_deg)
+    az = np.arctan2(-np.cos(decl) * np.sin(ha),
+                    np.sin(decl) * np.cos(lat) - np.cos(decl) * np.sin(lat) * np.cos(ha))
+    return np.degrees(np.mod(az, 2.0 * np.pi))
 
 def add_nc_var(name, dims, nc, data):
     """
@@ -55,7 +95,9 @@ def add_nc_dim(name, size, nc):
     if name not in nc.dimensions:
         nc.createDimension(name, size)
 
-# Get number of vertical levels and size from .ini file
+# Get number of vertical levels, size, and lat/lon from .ini file
+lat = None
+lon = None
 with open('cass.ini') as f:
     in_grid_section = False
     for line in f:
@@ -68,6 +110,10 @@ with open('cass.ini') as f:
                 kmax = int(line.split('=')[1])
             if key == 'zsize':
                 zsize = float(line.split('=')[1])
+            if key == 'lat':
+                lat = float(line.split('=')[1])
+            if key == 'lon':
+                lon = float(line.split('=')[1])
 
 dz = zsize / kmax
 
@@ -191,6 +237,19 @@ if args.qt_ls is not None:
     qt_ls_profile = np.where(z <= 2000., qt_ls_rate, 0.)
     qtls = np.tile(qt_ls_profile, (n_times, 1))
 
+# For --sun-wind, resample time_ls to a finer grid so solar-azimuth tracking
+# is smooth. Azimuth rotates ~16 deg/h; 600 s ≈ 2.7 deg per step.
+if args.sun_wind is not None:
+    if lat is None or lon is None:
+        raise RuntimeError("--sun-wind requires lat and lon in [grid] of cass.ini")
+    dt_new = 600.0
+    time_ls_new = np.arange(time_ls[0], time_ls[-1] + 1.0, dt_new)
+    thlls = np.array([np.interp(time_ls_new, time_ls, thlls[:, k]) for k in range(kmax)]).T
+    qtls  = np.array([np.interp(time_ls_new, time_ls, qtls[:, k])  for k in range(kmax)]).T
+    wls   = np.array([np.interp(time_ls_new, time_ls, wls[:, k])   for k in range(kmax)]).T
+    time_ls = time_ls_new
+    n_times = len(time_ls)
+
 
 # -----------------------------------------------------------------------
 # Read pre-computed CAMS aerosol composite (from compute_cams_composite.py).
@@ -231,12 +290,17 @@ nc_group_init = nc_file.createGroup("init")
 add_nc_var('z', ("z",), nc_group_init, z)
 add_nc_var("thl", ("z",), nc_group_init, thl)
 add_nc_var("qt", ("z",), nc_group_init, qt)
+add_nc_var("couvreux", ("z",), nc_group_init, np.zeros(kmax))
 if args.zero_winds:
     u_init = np.zeros(kmax); v_init = np.zeros(kmax)
 elif args.wind_u is not None:
     u_init = np.full(kmax, args.wind_u); v_init = np.zeros(kmax)
 elif args.geo_wind is not None:
     u_init = np.full(kmax, args.geo_wind); v_init = np.zeros(kmax)
+elif args.sun_wind is not None:
+    az0 = np.radians(solar_azimuth_deg(0.0, lat, lon))
+    u_init = np.full(kmax, -args.sun_wind * np.sin(az0))
+    v_init = np.full(kmax, -args.sun_wind * np.cos(az0))
 else:
     u_init = u; v_init = v
 add_nc_var("u", ("z",), nc_group_init, u_init)
@@ -244,7 +308,8 @@ add_nc_var("v", ("z",), nc_group_init, v_init)
 if args.geo_wind is not None:
     add_nc_var("u_geo", ("z",), nc_group_init, np.full(kmax, args.geo_wind))
     add_nc_var("v_geo", ("z",), nc_group_init, np.zeros(kmax))
-nudge_timescale = 10800.
+# For --sun-wind, u_geo/v_geo are written to the timedep group below.
+nudge_timescale = args.nudge_timescale
 add_nc_var("nudgefac", ("z",), nc_group_init, np.ones(kmax) / nudge_timescale)
 
 # Aerosol initial profiles: composite-mean on LES z grid
@@ -273,10 +338,23 @@ elif args.wind_u is not None:
     u_nudge_arr = np.full_like(uls, args.wind_u); v_nudge_arr = np.zeros_like(vls)
 elif args.geo_wind is not None:
     u_nudge_arr = np.full_like(uls, args.geo_wind); v_nudge_arr = np.zeros_like(vls)
+elif args.sun_wind is not None:
+    az_t = np.radians(solar_azimuth_deg(time_ls, lat, lon))
+    u_target = -args.sun_wind * np.sin(az_t)   # shape (n_times,)
+    v_target = -args.sun_wind * np.cos(az_t)
+    u_nudge_arr = np.broadcast_to(u_target[:, None], (n_times, kmax)).copy()
+    v_nudge_arr = np.broadcast_to(v_target[:, None], (n_times, kmax)).copy()
 else:
     u_nudge_arr = uls; v_nudge_arr = vls
 add_nc_var("u_nudge", ("time_ls", "z"), nc_group_timedep, u_nudge_arr)
 add_nc_var("v_nudge", ("time_ls", "z"), nc_group_timedep, v_nudge_arr)
+
+# For --sun-wind: write u_geo, v_geo to the timedep group (aligned with the
+# nudge target) so swtimedep_geo=true picks them up; Coriolis tendency then
+# vanishes when the BL wind matches the prescription.
+if args.sun_wind is not None:
+    add_nc_var("u_geo", ("time_ls", "z"), nc_group_timedep, u_nudge_arr)
+    add_nc_var("v_geo", ("time_ls", "z"), nc_group_timedep, v_nudge_arr)
 
 
 # Radiation variables on LES grid.
@@ -346,6 +424,7 @@ print(f"   Aerosols: composite mean over {n_cams} CAMS days (2003-2009)")
 wind_desc = ("zero winds" if args.zero_winds
              else f"u={args.wind_u:.1f} m/s (constant), v=0" if args.wind_u is not None
              else f"geo wind ug={args.geo_wind:.1f} m/s, vg=0" if args.geo_wind is not None
+             else f"sun-tracking wind, U={args.sun_wind:.1f} m/s anti-solar (time-dep u_nudge, v_nudge, u_geo, v_geo)" if args.sun_wind is not None
              else "ERA5 composite winds")
 print(f"   winds: {wind_desc}")
 print(f"   nudgefac = 1/{nudge_timescale:.0f} s [u,v only]")

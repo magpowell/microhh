@@ -45,6 +45,28 @@ bash experiments/<name>/submit_debug_<name>.sh   # debug QOS
 Debug uses `shared/sbatch_debug.sh` (debug QOS, single GPU, ~15-30 min for 64x64).
 Log: `$SCRATCH/CASS_LES/logs/debug-<JOBID>.out`
 
+### 4. Restart after a TIMEOUT
+
+If a run hits the wall before reaching the completion timestamp:
+
+```bash
+bash experiments/<name>/submit_restart_<name>.sh [2stream|raytracer]
+```
+
+The restart script auto-detects the latest savetime, verifies all
+prognostic vars are present, and patches `[time] starttime` in `cass.ini`.
+It does **not** wipe restart files or call `microhh init`.
+
+**Post-processing after restart**: when converting binary dumps with
+`3d_to_nc.py` or `cross_to_nc.py`, pass `-t0 0` so the full simulation
+timeline is converted (the patched `cass.ini` would otherwise start the
+output time axis at the restart point).
+
+> **Tracer overhead**: experiments with the Couvreux passive tracer
+> (e.g. `no_aerosols_zero_wind_v2`) run ~25 % slower than pre-tracer
+> versions.  Either bump 2stream wall to 12 h / raytracer to 28 h, or
+> use the restart workflow.
+
 ---
 
 ## Constraints

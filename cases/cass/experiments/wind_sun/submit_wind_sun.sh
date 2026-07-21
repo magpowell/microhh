@@ -1,9 +1,10 @@
 #!/bin/bash
-# Submit CASS no_aerosols_zero_wind experiment runs: 2 jobs (2stream + raytracer), 4 reps each.
+# Submit CASS wind_sun experiment runs.
+# 2 jobs (2stream + raytracer), 4 reps each on 1 node.
 set -euo pipefail
 
 SCRATCH=${SCRATCH:-/pscratch/sd/m/mpowell}
-EXP="$SCRATCH/CASS_LES/experiments/no_aerosols_zero_wind_v2"
+EXP="$SCRATCH/CASS_LES/experiments/wind_sun"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p "$SCRATCH/CASS_LES/logs"
@@ -18,10 +19,10 @@ SIM_DIRS=$(IFS=':'; echo "${SIM_DIRS_LIST[*]}")
 sbatch \
     --constraint=gpu \
     --time=10:00:00 \
-    --job-name=nazw_2s \
+    --job-name="ws_2s" \
     --export=ALL,SIM_DIRS="$SIM_DIRS" \
-    "$SCRIPT_DIR/sbatch_no_aerosols_zero_wind.sh"
-echo "Submitted no_aerosols_zero_wind 2stream"
+    "$SCRIPT_DIR/sbatch_wind_sun.sh"
+echo "Submitted wind_sun 2stream"
 
 # raytracer
 SIM_DIRS_LIST=()
@@ -33,7 +34,7 @@ SIM_DIRS=$(IFS=':'; echo "${SIM_DIRS_LIST[*]}")
 sbatch \
     --constraint="gpu&hbm80g" \
     --time=22:00:00 \
-    --job-name=nazw_rt \
+    --job-name="ws_rt" \
     --export=ALL,SIM_DIRS="$SIM_DIRS" \
-    "$SCRIPT_DIR/sbatch_no_aerosols_zero_wind.sh"
-echo "Submitted no_aerosols_zero_wind raytracer"
+    "$SCRIPT_DIR/sbatch_wind_sun.sh"
+echo "Submitted wind_sun raytracer"

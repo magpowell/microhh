@@ -18,7 +18,7 @@
 ## Shared functions (cass_analysis.py)
 
 **Data loading:**
-- `load_stats(run_dir)` → `xr.Dataset` (domain-mean stats from all groups)
+- `load_stats(run_dir, mask="default")` → `xr.Dataset` (domain-mean stats from all groups). Pass `mask="couvreux"`, `mask="wplus"`, etc. to open the mask-conditioned stats file `cass.{mask}.0000000.nc`.
 - `load_stats_ensemble(rep_dirs)` → `(mean, std)` xr.Datasets
 - `load_xy_files(run_dir, variables)` → `xr.Dataset` (surface xy fields, lazy/dask)
 - `load_sfc_xy(run_dir, varname)` → `(arr, t_sec)` numpy arrays
@@ -53,7 +53,7 @@
 
 ## Data file layout
 
-Stats: `$RUN_DIR/cass.default.0000000.nc` (groups: land_surface, radiation, thermo, default)
+Stats: `$RUN_DIR/cass.{mask}.0000000.nc` (masks: `default`, `couvreux`, `wplus`, `ql`; groups: land_surface, radiation, thermo, default)
 XY snapshots: `$RUN_DIR/<var>.xy.nc`
 3D dumps: `$RUN_DIR/<var>.nc` (after `3d_to_nc.py`)
 Composites: `$SCRATCH/CASS_LES/analysis/cloud_root_composite/<expt>/<rt>/rep_NN/events_{xz,yz}.nc`
@@ -73,7 +73,21 @@ Caches: `$SCRATCH/CASS_LES/analysis/*.pkl` (regenerable, not committed)
 
 ## Notebooks
 
-- `base_comparison.ipynb` — deep-dive on no_aerosols_zero_wind (LWP, SEB, profiles, w*, T_scale)
+- `base_comparison.ipynb` — headline figures for no_aerosols_zero_wind: LWP + cloud population (§1), sw_scale comparison, SEB domain-mean + cloud-conditioned (§2), q_l time-height (§2), azimuth-rotated shadow composites with 1D / 3D / diff / SW% per SZA window (§3)
+- `tmp_exploration.ipynb` — exploratory diagnostics: shell decomposition (Heus & Jonker), w*, T_tau, ε(z), archived xz/yz composites, surface-field distributions
+- `wind_geo_comparison.ipynb` — geostrophic-wind sweep: LWP summary + Bowen ratio vs u_g
 - `radiative_coupling.ipynb` — alpha, gamma_s, Q_rho profiles (core theoretical framework)
-- `composite_shadow_figures.ipynb` — L&P composites, circulation + SW shadow figures, azimuth composites
 - `delta_sw_prediction.ipynb` — full α closure chain: f_shadow, SW_out, and α_3D predictions from observable quantities (validated on CASS + Tijhuis Zenodo 15649286)
+
+## updrafts/ pipeline
+
+H1 (mass flux) + H2 (tracer-dilution entrainment) via the offline Couvreux mask.
+See `updrafts/PLAN.md` for the full spec.
+
+- `diagnostics.py` — `compute_sigma_min`, `build_couvreux_mask`,
+  `updraft_mass_flux`, `entrainment_rate_tracer`, `compute_h1_h2_ensemble`
+- `sanity_check.py` — CLI runner; Level-1 (stats-only, runs immediately after a
+  sim finishes) and Level-2 (needs `3d_to_nc.py` first) checks with graceful skip
+- `verify_and_cleanup.py` — verify each `{var}.nc` against its binary dumps,
+  then (with `--delete`) reclaim disk while preserving the final-timestamp
+  restart files (~45 GB per 256³ rep)

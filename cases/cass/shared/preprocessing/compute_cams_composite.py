@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 """
-Compute composite-mean CAMS aerosol profiles from the local LS2D_CAMS cache.
+Compute composite CAMS aerosol profiles from the local LS2D_CAMS cache.
 
-Reads pre-downloaded CAMS EAC4 data (from download_cams.py), averages over
-all composite days with available CAMS data (2003-2009), and writes
-cass_cams_composite.nc to $SCRATCH/CASS_LES/shared_data/.
+Reads pre-downloaded CAMS EAC4 data (from download_cams.py), takes the
+**median across days** of the daily-mean (capped) profiles, and zeros the
+sea-salt species (aermr01-03) which are a CAMS-at-inland-SGP artifact.
+Writes cass_cams_composite.nc to $SCRATCH/CASS_LES/shared_data/.
+
+Why median, not mean: the SGP daily-AOD distribution is strongly
+right-skewed (dust storms with AOD > 4 alongside clean days at AOD ~0.1).
+The mean is dominated by those outliers and produced a composite with
+AOD ~0.4 — well above SGP AERONET climatology (~0.15) and severe enough
+to suppress convection. Median brings the composite back toward
+climatology while keeping all dscu=1 days in the sample.
 
 Run once (or re-run idempotently — output is overwritten).
 Output is then symlinked into shared/data/ for use by cass_input.py.
@@ -82,12 +90,16 @@ PHYS_MAX = {
     'aermr04': 2e-7,    # dust 0.03–0.55 µm
     'aermr05': 2e-7,    # dust 0.55–0.9 µm
     'aermr06': 5e-7,    # dust 0.9–20 µm   (coarse: large in strong events)
-    'aermr07': 1e-8,    # OM hydrophilic   
+    'aermr07': 1e-8,    # OM hydrophilic
     'aermr08': 1e-8,    # OM hydrophobic
     'aermr09': 1e-8,    # BC hydrophilic
     'aermr10': 1e-8,    # BC hydrophobic
-    'aermr11': 1e-8,    # sulphate         
+    'aermr11': 1e-8,    # sulphate
 }
+
+# Sea salt at inland SGP is a CAMS interpolation artifact (AERONET shows no
+# marine signature). Zero these out after the cross-day reduction.
+ZERO_SPECIES = ['aermr01', 'aermr02', 'aermr03']
 
 # -----------------------------------------------------------------------
 # Loop over composite days and accumulate
@@ -126,11 +138,18 @@ if n_ok == 0:
     raise RuntimeError('No CAMS days were successfully processed. '
                        'Run download_cams.py first.')
 
-# nanmean across days so any NaN levels/days are skipped rather than propagated.
-print(f'\nAveraging over {n_ok} days...')
+# Cross-day reduction: median (robust against dust-storm outliers; the
+# distribution of daily AOD is strongly right-skewed, mean/median ≈ 2x).
+# z_lay still uses the mean (level heights are not skewed).
+print(f'\nReducing over {n_ok} days (median for aerosols, mean for z_lay)...')
 z_lay = np.nanmean(np.stack(z_lay_stack), axis=0)
-aer_lay = {name: np.nanmean(np.stack(aer_lay_stack[name]), axis=0)
+aer_lay = {name: np.nanmedian(np.stack(aer_lay_stack[name]), axis=0)
            for name in aerosol_names}
+
+# Zero unphysical species at inland SGP.
+for name in ZERO_SPECIES:
+    aer_lay[name][:] = 0.0
+print(f'  zeroed: {ZERO_SPECIES} (CAMS sea-salt-inland artifact)')
 
 # -----------------------------------------------------------------------
 # Write output
@@ -140,6 +159,8 @@ n_lay = z_lay.size
 with nc.Dataset(OUT_FILE, 'w', format='NETCDF4') as f:
     f.n_composite_days = n_ok
     f.composite_day_range = '2003-2009 (dscu==1 from shcu_sgp_summer_97to09.nc)'
+    f.cross_day_reducer = 'nanmedian (was nanmean prior to AOD-reduction fix)'
+    f.zeroed_species = ', '.join(ZERO_SPECIES) + ' (inland-SGP sea-salt artifact)'
     f.phys_max_caps = '; '.join(f'{k}={v:.1e}' for k, v in PHYS_MAX.items())
     f.createDimension('lay', n_lay)
 
