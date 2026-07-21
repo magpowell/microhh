@@ -59,15 +59,18 @@ set(CURAND_LIB_1 "${CURAND_LIB_DIR}/libcurand.so")
 set(CUFFT_LIB_DIR "/opt/nvidia/hpc_sdk/Linux_x86_64/24.5/math_libs/lib64")
 set(CUFFT_INCLUDE_DIR "/opt/nvidia/hpc_sdk/Linux_x86_64/24.5/math_libs/include")
 set(CUFFT_LIB_1 "${CUFFT_LIB_DIR}/libcufft.so")
+set(CUDA_INCLUDE_DIR "/opt/nvidia/hpc_sdk/Linux_x86_64/24.5/cuda/12.4/include")
+
 
 set(SZIP_LIB "")
 set(LIBS ${NETCDF_LIB_C} ${HDF5_LIB_2} ${HDF5_LIB_1} ${CURAND_LIB_1} ${CUFFT_LIB_1} ${FFTW_LIB} ${FFTWF_LIB} ${SZIP_LIB} m z curl)
-set(INCLUDE_DIRS ${NETCDF_INCLUDE_DIR} ${CURAND_INCLUDE_DIR} ${CUFFT_INCLUDE_DIR} ${FFTW_INCLUDE_DIR})
+set(INCLUDE_DIRS ${NETCDF_INCLUDE_DIR} ${CURAND_INCLUDE_DIR} ${CUFFT_INCLUDE_DIR} ${FFTW_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
 link_directories(${CURAND_LIB_DIR} ${CUFFT_LIB_DIR})
 
 # CUDA support
 if(USECUDA)
     set(CUDA_PROPAGATE_HOST_FLAGS OFF)
+    set(CMAKE_CUDA_HOST_COMPILER "/usr/bin/g++-13")
     set(CMAKE_CUDA_ARCHITECTURES 80)
     set(USER_CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
     set(USER_CUDA_NVCC_FLAGS_RELEASE "-DNDEBUG")

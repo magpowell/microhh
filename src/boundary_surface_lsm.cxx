@@ -278,6 +278,7 @@ Boundary_surface_lsm<TF>::Boundary_surface_lsm(
     // BvS: for now, read surface emission from radiation group. This needs
     // to be coupled correctly, also for 2D varying emissivities.
     emis_sfc = inputin.get_item<TF>("radiation", "emis_sfc", "");
+    rs_scale = inputin.get_item<TF>("land_surface", "rs_scale", "", TF(1));
 
     // Create prognostic 2D and 3D fields;
     fields.init_prognostic_soil_field("t", "Soil temperature", "K");
@@ -557,6 +558,7 @@ void Boundary_surface_lsm<TF>::exec(
                 rhorefh.data(),
                 exnrefh.data(),
                 db_ref, emis_sfc,
+                rs_scale,
                 TF(subdt),
                 gd.istart, gd.iend,
                 gd.jstart, gd.jend,

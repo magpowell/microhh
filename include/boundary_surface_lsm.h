@@ -160,6 +160,7 @@ class Boundary_surface_lsm : public Boundary<TF>
         std::vector<TF> theta_nudge;     // target soil moisture profile (m3 m-3)
 
         TF emis_sfc;
+        TF rs_scale;  // Multiplicative scaling factor for surface resistance (-)
 
         std::vector<std::string> tile_names {"veg", "soil" ,"wet"};
         Tile_map<TF> tiles;

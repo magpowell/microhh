@@ -506,6 +506,7 @@ Radiation_rrtmgp_rt<TF>::Radiation_rrtmgp_rt(
     sw_homogenize_sfc_lw = inputin.get_item<bool>("radiation", "swhomogenizesfc_lw", "", false);
     sw_homogenize_hr_sw = inputin.get_item<bool>("radiation", "swhomogenizehr_sw", "", false);
     sw_homogenize_hr_lw = inputin.get_item<bool>("radiation", "swhomogenizehr_lw", "", false);
+    sw_scale_sfc_to_2str = inputin.get_item<bool>("radiation", "swscalesfc_to_2str", "", false);
 
     dt_rad = inputin.get_item<double>("radiation", "dt_rad", "");
 
@@ -712,6 +713,11 @@ void Radiation_rrtmgp_rt<TF>::create(
         if (sw_aerosol)
         {
             stats.add_time_series("AOD550", "Aerosol optical depth at 550nm", "-", group_name);
+        }
+
+        if (sw_scale_sfc_to_2str)
+        {
+            stats.add_time_series("sw_scale_factor", "SW surface flux scaling factor (2str mean / RT mean)", "-", group_name);
         }
     }
 

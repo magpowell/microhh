@@ -161,6 +161,14 @@ namespace
     }
 
     __global__
+    void scale_field_2d(Float* __restrict__ fld, const int nsize, const Float scale)
+    {
+        const int n = blockIdx.x*blockDim.x + threadIdx.x;
+        if (n < nsize)
+            fld[n] *= scale;
+    }
+
+    __global__
     void add_profile(
             Float* __restrict__ fld,
             const Float* __restrict__ profile,
@@ -1085,6 +1093,12 @@ void Radiation_rrtmgp_rt<TF>::prepare_device()
         const int nsfcsize = gd.ijcells*sizeof(Float);
         cuda_safe_call(cudaMalloc(&sw_flux_dn_sfc_g, nsfcsize));
         cuda_safe_call(cudaMalloc(&sw_flux_up_sfc_g, nsfcsize));
+
+        if (sw_scale_sfc_to_2str)
+        {
+            cuda_safe_call(cudaMalloc(&sw_flux_dn_sfc_2str_g, nsfcsize));
+            cuda_safe_call(cudaMalloc(&sw_flux_up_sfc_2str_g, nsfcsize));
+        }
 
         cuda_safe_call(cudaMalloc(&sw_flux_sfc_dir_rt_g, nsfcsize));
         cuda_safe_call(cudaMalloc(&sw_flux_sfc_dif_rt_g, nsfcsize));
@@ -2249,6 +2263,37 @@ void Radiation_rrtmgp_rt<TF>::exec(
                         cuda_check_error();
                     }
 
+                    if (sw_scale_sfc_to_2str && run_raytracer)
+                    {
+                        // Store 2stream surface fluxes into temporary buffers (ijcells layout with ghost cells).
+                        store_surface_fluxes<<<gridGPU_2d, blockGPU_2d>>>(
+                                sw_flux_up_sfc_2str_g, sw_flux_dn_sfc_2str_g,
+                                flux_up.ptr(), flux_dn.ptr(),
+                                gd.istart, gd.iend,
+                                gd.jstart, gd.jend,
+                                gd.igc, gd.jgc,
+                                gd.icells, gd.ijcells,
+                                gd.imax);
+                        cuda_check_error();
+
+                        const TF str_mean = field3d_operators.calc_mean_2d_g(sw_flux_dn_sfc_2str_g);
+                        const TF rt_mean  = field3d_operators.calc_mean_2d_g(sw_flux_dn_sfc_g);
+
+                        if (rt_mean > TF(0))
+                        {
+                            this->sw_scale_factor = str_mean / rt_mean;
+                            const int blockGPU = 256;
+                            const int gridGPU = gd.ijcells/blockGPU + (gd.ijcells%blockGPU > 0);
+                            scale_field_2d<<<gridGPU, blockGPU>>>(sw_flux_dn_sfc_g, gd.ijcells, this->sw_scale_factor);
+                            scale_field_2d<<<gridGPU, blockGPU>>>(sw_flux_up_sfc_g, gd.ijcells, this->sw_scale_factor);
+                            cuda_check_error();
+                        }
+                        else
+                        {
+                            this->sw_scale_factor = TF(1);
+                        }
+                    }
+
                     if (sw_homogenize_sfc_sw)
                     {
                         homogenize(sw_flux_up_sfc_g);
@@ -2436,6 +2481,9 @@ void Radiation_rrtmgp_rt<TF>::clear_device()
     cuda_safe_call(cudaFree(sw_flux_dn_sfc_g));
     cuda_safe_call(cudaFree(sw_flux_up_sfc_g));
 
+    if (sw_flux_dn_sfc_2str_g) cuda_safe_call(cudaFree(sw_flux_dn_sfc_2str_g));
+    if (sw_flux_up_sfc_2str_g) cuda_safe_call(cudaFree(sw_flux_up_sfc_2str_g));
+
     for (auto& it : gasprofs_g)
         cuda_safe_call(cudaFree(it.second));
 
@@ -2585,6 +2633,9 @@ void Radiation_rrtmgp_rt<TF>::exec_all_stats(
         stats.set_time_series("saa", azimuth);
         stats.set_time_series("tsi_scaling", this->tsi_scaling);
         stats.set_time_series("sw_flux_dn_toa", sw_flux_dn_col({1,n_lev_col}));
+
+        if (sw_scale_sfc_to_2str)
+            stats.set_time_series("sw_scale_factor", this->sw_scale_factor);
     }
 }
 #endif

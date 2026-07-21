@@ -235,6 +235,9 @@ class Radiation_rrtmgp_rt : public Radiation<TF>
         bool sw_homogenize_hr_sw;
         bool sw_homogenize_hr_lw;
 
+        bool sw_scale_sfc_to_2str;
+        Float sw_scale_factor = Float(1);
+
         // Make sure that the sw radiation is tuned at the first `exec()`. This
         // ensures that sw is tuned for the full 3D field, and not for the column stats.
         bool sw_is_tuned = false;
@@ -331,6 +334,10 @@ class Radiation_rrtmgp_rt : public Radiation<TF>
 
         Float* sw_flux_dn_sfc_g;
         Float* sw_flux_up_sfc_g;
+
+        // Temporary buffers used only when sw_scale_sfc_to_2str=true
+        Float* sw_flux_dn_sfc_2str_g = nullptr;
+        Float* sw_flux_up_sfc_2str_g = nullptr;
 
         Float* sw_flux_dn_dir_inc_g;
         Float* sw_flux_dn_dif_inc_g;

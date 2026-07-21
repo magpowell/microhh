@@ -295,6 +295,7 @@ namespace Land_surface_kernels_g
             const TF* const __restrict__ exnerh,
             const TF db_ref,
             const TF emis_sfc,
+            const TF rs_scale,
             const TF dt,
             const int istart, const int iend,
             const int jstart, const int jend,
@@ -316,8 +317,8 @@ namespace Land_surface_kernels_g
 
             const TF T_bot = thl_bot[ij] * exner_bot;
 
-            // Disable canopy resistance in case of dew fall
-            const TF rs_lim = qsat_bot[ij] < qt[ijk] ? TF(0) : rs[ij];
+            // Disable canopy resistance in case of dew fall, then apply scaling factor
+            const TF rs_lim = (qsat_bot[ij] < qt[ijk] ? TF(0) : rs[ij]) * rs_scale;
 
             // Switch between skin heat capacity or not
             const TF cs_veg_lim = use_cs_veg ? cs_veg[ij] : TF(0);

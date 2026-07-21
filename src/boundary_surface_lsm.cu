@@ -310,6 +310,7 @@ void Boundary_surface_lsm<TF>::exec(
                 rhorefh,
                 exnrefh,
                 db_ref, emis_sfc,
+                rs_scale,
                 TF(subdt),
                 gd.istart, gd.iend,
                 gd.jstart, gd.jend,
