@@ -3,14 +3,17 @@
 Setup complexity-reduction experiments for LES cumulus case 20140325_t03.
 
 Three experiments, each with 3 random-seed reps × {rt, standard} = 6 runs:
-  1. no_aerosols  — aerosols off (already the default in the source ini)
-  2. no_gases     — aerosols off + all gas mixing ratios zeroed in input NC
-  3. dark_ocean   — no_gases + surface albedo set to 0.07
+  1. no_aerosols      — aerosols off
+  2. no_gases         — aerosols off + all gas mixing ratios zeroed in input NC
+  3. prescribed_fluxes — aerosols off; surface fluxes prescribed from paper_results
+                         ensemble mean H(t)/LE(t); tests 3D vs 1D heating rates
 
 Output base: /pscratch/sd/m/mpowell/SENSITIVITY_LES_CUMULUS/complexity_20140325/
 
-Before running this script, generate the no-gases input file:
+Before running this script, prepare the input files (run once):
+    python fix_input_nc.py          # adds z + time_rad to timedep group
     python make_no_gases_nc.py
+    python make_prescribed_flux_nc.py
 """
 
 import argparse
@@ -25,7 +28,7 @@ MICROHH_DIR = Path("/global/homes/m/mpowell/repos/microhh")
 PATHS = {
     "microhh":       MICROHH_DIR / "build_gpu" / "microhh",
     "rrtmgp_data":   MICROHH_DIR / "rte-rrtmgp-cpp" / "rrtmgp-data",
-    "cabauw_cases":  MICROHH_DIR / "cases" / "cabauw",
+    "cabauw_cases":  MICROHH_DIR / "misc",
     "cross_to_nc":   MICROHH_DIR / "python" / "cross_to_nc.py",
     "microhh_tools": MICROHH_DIR / "python" / "microhh_tools.py",
 }
@@ -44,13 +47,24 @@ RADIATION_CONFIG = {"rt": "rrtmgp_rt", "standard": "rrtmgp"}
 N_REPS = 3
 SEEDS = list(range(1, N_REPS + 1))
 
+# Per-experiment input NC (source ini is always SOURCE_CASE/rt/cabauw.ini for all)
+EXPERIMENTS = {
+    "no_aerosols":      SOURCE_CASE / "cabauw_input.nc",
+    "no_gases":         SOURCE_CASE / "cabauw_input_no_gases.nc",
+    "prescribed_fluxes": SOURCE_CASE / "cabauw_input_prescribed_flux.nc",
+}
+
 # Scripts to symlink from this directory into OUTPUT_BASE
 REPO_SCRIPTS_DIR = Path(__file__).resolve().parent
 REPO_SCRIPTS = [
     "setup_complexity.py",
     "make_no_gases_nc.py",
+    "make_prescribed_flux_nc.py",
+    "fix_input_nc.py",
     "sbatch_complexity.sh",
     "submit_complexity.sh",
+    "sbatch_restart_complexity.sh",
+    "submit_restart_complexity.sh",
 ]
 
 
@@ -79,6 +93,7 @@ def create_ini(rad_type: str, rndseed: int, experiment: str, out_path: Path):
     """Write a modified cabauw.ini for a complexity experiment run.
 
     Source: SOURCE_CASE/rt/cabauw.ini (already has swaerosol=false, swcross=1).
+    All experiments have aerosols off.
     """
     config = configparser.ConfigParser()
     config.optionxform = str
@@ -92,44 +107,39 @@ def create_ini(rad_type: str, rndseed: int, experiment: str, out_path: Path):
     config.set("dump",   "swdump",  "0")
     config.set("cross",  "swcross", "1")
 
-    # Aerosols off (explicit, even though source already has this)
+    # Aerosols off for all experiments (explicit, even though source already has this)
     config.set("aerosol", "swaerosol", "false")
     config.set("aerosol", "swtimedep", "false")
 
-    # no_gases / dark_ocean: disable time-dependent gas reading
-    if experiment in ("no_gases", "dark_ocean"):
-        config.set("radiation", "timedeplist_gas", "")
+    # no_gases: remove timedeplist_gas entirely so MicroHH uses its default
+    # empty list. Setting it to "" produces [""] in the parser, which triggers
+    # an "Illegal string" exception in input_tools.h check_item().
+    if experiment == "no_gases":
+        config.remove_option("radiation", "timedeplist_gas")
 
-    # dark_ocean: ocean surface properties.
-    # swwater=1 is incompatible with swhomogeneous=1, so we replicate the
-    # water-tile physics manually (mirrors what set_water_tiles kernel does).
-    if experiment == "dark_ocean":
-        # Radiation
-        config.set("radiation", "sfc_alb_dir", "0.07")
-        config.set("radiation", "sfc_alb_dif", "0.07")
-        config.set("radiation", "emis_sfc",    "0.99")
-        # Aerodynamic roughness (open ocean, ~COARE typical fixed value)
+    # prescribed_fluxes: bypass LSM with time-varying kinematic surface fluxes
+    if experiment == "prescribed_fluxes":
+        config.set("boundary", "swboundary",  "surface")
+        config.set("boundary", "sbcbot[thl]", "flux")
+        config.set("boundary", "sbcbot[qt]",  "flux")
+        config.set("boundary", "sbot[thl]",   "0.")   # overridden by timedep at runtime
+        config.set("boundary", "sbot[qt]",    "0.")   # overridden by timedep at runtime
+        config.set("boundary", "swtimedep",   "1")
+        config.set("boundary", "timedeplist", "thl_sbot,qt_sbot")
         config.set("boundary", "z0m", "0.0002")
         config.set("boundary", "z0h", "0.0002")
-        # Land-surface: remove vegetation, set resistances to zero
-        # (kernel explicitly zeros c_veg, rs_veg, rs_soil for water tiles)
-        config.set("land_surface", "c_veg",          "0.0")
-        config.set("land_surface", "lai",             "0.0")
-        config.set("land_surface", "rs_veg_min",      "0")
-        config.set("land_surface", "rs_soil_min",     "0")
-        config.set("land_surface", "lambda_stable",   "0.0")
-        config.set("land_surface", "lambda_unstable", "0.0")
 
     with open(out_path, "w") as f:
         config.write(f)
 
 
-def setup_experiment(experiment: str, input_nc: Path):
+def setup_experiment(experiment: str):
     """Set up one experiment across all radiation types and seeds."""
     print(f"\n{'='*60}")
     print(f"Setting up: {experiment}")
     print(f"{'='*60}")
 
+    input_nc = EXPERIMENTS[experiment]
     for rad_type in ["rt", "standard"]:
         for seed in SEEDS:
             run_name = f"seed_{seed}"
@@ -155,31 +165,22 @@ def setup_repo_symlinks():
 
 
 def main():
-    normal_nc   = SOURCE_CASE / "cabauw_input.nc"
-    no_gases_nc = SOURCE_CASE / "cabauw_input_no_gases.nc"
-
     OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
     setup_repo_symlinks()
 
-    # Experiment 1: aerosols off, gases still present
-    setup_experiment("no_aerosols", input_nc=normal_nc)
+    skipped = []
+    for experiment, input_nc in EXPERIMENTS.items():
+        if not input_nc.exists():
+            print(f"\nWARNING: {input_nc.name} not found, skipping {experiment}.")
+            skipped.append(experiment)
+            continue
+        setup_experiment(experiment)
 
-    # Check that the no-gases NC was pre-generated
-    if not no_gases_nc.exists():
-        print(f"\nWARNING: {no_gases_nc} not found.")
-        print("Run first:  python make_no_gases_nc.py")
-        print("Skipping no_gases and dark_ocean experiments.")
-        return
-
-    # Experiment 2: no gases, no aerosols
-    setup_experiment("no_gases", input_nc=no_gases_nc)
-
-    # Experiment 3: no gases, no aerosols, dark ocean surface
-    setup_experiment("dark_ocean", input_nc=no_gases_nc)
-
-    n_dirs = 3 * N_REPS * 2
-    print(f"\nSetup complete. {n_dirs} simulation directories created under:")
+    n_done = len(EXPERIMENTS) - len(skipped)
+    print(f"\nSetup complete. {n_done * N_REPS * 2} simulation directories created under:")
     print(f"  {OUTPUT_BASE}")
+    if skipped:
+        print(f"Skipped (missing input NC): {', '.join(skipped)}")
 
 
 if __name__ == "__main__":

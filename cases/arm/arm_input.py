@@ -1,15 +1,40 @@
 import numpy as np
 import netCDF4 as nc
+import xarray as xr
 
 float_type = "f8"
 
+def add_nc_var(name, dims, nc, data):
+    """
+    Add NetCDF variable to `nc` file or group.
+    """
+    if name not in nc.variables:
+        if dims is None:
+            var = nc.createVariable(name, np.float64)
+        else:
+            var = nc.createVariable(name, np.float64, dims)
+        var[:] = data
+
+def add_nc_dim(name, size, nc):
+    """
+    Add NetCDF dimension, if it does not already exist.
+    """
+    if name not in nc.dimensions:
+        nc.createDimension(name, size)
+
 # Get number of vertical levels and size from .ini file
 with open('arm.ini') as f:
+    in_grid_section = False
     for line in f:
-        if line.split('=')[0] == 'ktot':
-            kmax = int(line.split('=')[1])
-        if line.split('=')[0]=='zsize':
-            zsize = float(line.split('=')[1])
+        line_stripped = line.strip()
+        if line_stripped.startswith('['):
+            in_grid_section = (line_stripped == '[grid]')
+        if in_grid_section:
+            key = line.split('=')[0].strip()
+            if key == 'ktot':
+                kmax = int(line.split('=')[1])
+            if key == 'zsize':
+                zsize = float(line.split('=')[1])
 
 dz = zsize / kmax
 
@@ -131,5 +156,53 @@ nc_qt_ls   = nc_group_timedep.createVariable("qt_ls"  , float_type, ("time_ls", 
 nc_time_ls[:]   = time_ls[:]
 nc_thl_ls [:,:] = thlls  [:,:]
 nc_qt_ls  [:,:] = qtls   [:,:]
+
+# Radiation variables on LES grid.
+ls2d_radiation = xr.open_dataset('arm_ls2d_input.nc', group = 'radiation')
+o3_z = np.interp(z, ls2d_radiation.z_lay.values, ls2d_radiation.o3.values)
+h2o_z = np.interp(z, ls2d_radiation.z_lay.values, ls2d_radiation.h2o.values)
+# add radiation to init group
+add_nc_var('h2o', ('z'), nc_group_init, h2o_z)
+add_nc_var('o3',  ('z'), nc_group_init, o3_z)
+add_nc_var('co2', (), nc_group_init, ls2d_radiation.co2.values)
+add_nc_var('ch4', (), nc_group_init, ls2d_radiation.ch4.values)
+add_nc_var('n2o', (), nc_group_init, ls2d_radiation.n2o.values)
+add_nc_var('n2', (), nc_group_init, ls2d_radiation.n2.values)
+add_nc_var('o2', (), nc_group_init, ls2d_radiation.o2.values)
+
+# and to radiation group
+nc_rad = nc_file.createGroup('radiation')
+add_nc_dim('lay', ls2d_radiation.sizes['lay'], nc_rad)
+add_nc_dim('lev', ls2d_radiation.sizes['lev'], nc_rad)
+
+# Layer variables
+add_nc_var('z_lay', ('lay',), nc_rad, ls2d_radiation.z_lay.values)
+add_nc_var('p_lay', ('lay',), nc_rad, ls2d_radiation.p_lay.values)
+add_nc_var('t_lay', ('lay',), nc_rad, ls2d_radiation.t_lay.values)
+add_nc_var('o3', ('lay',), nc_rad, ls2d_radiation.o3.values)
+add_nc_var('h2o', ('lay',), nc_rad, ls2d_radiation.h2o.values)
+
+# Level variables
+add_nc_var('z_lev', ('lev',), nc_rad, ls2d_radiation.z_lev.values)
+add_nc_var('p_lev', ('lev',), nc_rad, ls2d_radiation.p_lev.values)
+add_nc_var('t_lev', ('lev',), nc_rad, ls2d_radiation.t_lev.values)
+
+# Scalar gas concentrations
+add_nc_var('co2', (), nc_rad, ls2d_radiation.co2.values)
+add_nc_var('ch4', (), nc_rad, ls2d_radiation.ch4.values)
+add_nc_var('n2o', (), nc_rad, ls2d_radiation.n2o.values)
+add_nc_var('n2', (), nc_rad, ls2d_radiation.n2.values)
+add_nc_var('o2', (), nc_rad, ls2d_radiation.o2.values)
+
+
+# land surface model
+ls2d_soil = xr.open_dataset('arm_ls2d_input.nc', group = 'soil')
+nc_soil = nc_file.createGroup('soil')
+add_nc_dim('z', ls2d_soil.sizes['z'], nc_soil)
+add_nc_var('z', ('z'), nc_soil, ls2d_soil.z.values)
+add_nc_var('theta_soil', ('z'), nc_soil, ls2d_soil.theta_soil.values)
+add_nc_var('t_soil', ('z'), nc_soil, ls2d_soil.t_soil.values)
+add_nc_var('index_soil', ('z'), nc_soil, ls2d_soil.index_soil.values)
+add_nc_var('root_frac', ('z'), nc_soil, ls2d_soil.root_frac.values)
 
 nc_file.close()

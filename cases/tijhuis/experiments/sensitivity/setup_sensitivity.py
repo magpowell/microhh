@@ -22,7 +22,7 @@ MICROHH_DIR = Path("/global/homes/m/mpowell/repos/microhh")
 PATHS = {
     'microhh':       MICROHH_DIR / 'build_gpu' / 'microhh',
     'rrtmgp_data':   MICROHH_DIR / 'rte-rrtmgp-cpp' / 'rrtmgp-data',
-    'cabauw_cases':  MICROHH_DIR / 'cases' / 'cabauw',
+    'cabauw_cases':  MICROHH_DIR / 'misc',
     'cross_to_nc':   MICROHH_DIR / 'python' / 'cross_to_nc.py',
     'microhh_tools': MICROHH_DIR / 'python' / 'microhh_tools.py',
 }

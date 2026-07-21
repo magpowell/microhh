@@ -1,23 +1,42 @@
 #!/bin/bash
-# Submit all complexity experiment runs for 20140325_t03.
+# Submit complexity experiment runs for 20140325_t03.
 #
 # 3 experiments × 2 radiation types × 3 seeds = 18 simulations.
 # Seeds are batched by radiation type (3 tasks per node, 3 GPUs used).
 #
 # Usage:
-#   ./submit_complexity.sh              # submit all experiments
-#   ./submit_complexity.sh no_aerosols  # submit one experiment only
+#   ./submit_complexity.sh                       # submit all experiments
+#   ./submit_complexity.sh no_aerosols           # submit one experiment only
+#   ./submit_complexity.sh --debug               # debug qos, 30 min, no_aerosols
+#   ./submit_complexity.sh --debug prescribed_fluxes  # debug a specific experiment
 
 set -euo pipefail
 
 BASE=/pscratch/sd/m/mpowell/SENSITIVITY_LES_CUMULUS/complexity_20140325
 SBATCH_SCRIPT=$BASE/sbatch_complexity.sh
 
-TARGET_EXP="${1:-}"  # optional: restrict to one experiment
+# Parse arguments
+DEBUG=0
+TARGET_EXP=""
+for arg in "$@"; do
+    case "$arg" in
+        --debug|-d) DEBUG=1 ;;
+        *) TARGET_EXP="$arg" ;;
+    esac
+done
 
-# Wall times match the sensitivity experiment convention
-RT_TIME="20:00:00"
-STD_TIME="10:00:00"
+# Wall times
+RT_TIME="25:00:00"
+STD_TIME="15:00:00"
+
+# Debug mode: short wall time, debug QOS, default to one experiment
+SBATCH_EXTRA=()
+if [[ $DEBUG -eq 1 ]]; then
+    RT_TIME="00:30:00"
+    STD_TIME="00:30:00"
+    SBATCH_EXTRA+=(--qos=debug)
+    [[ -z "$TARGET_EXP" ]] && TARGET_EXP="no_aerosols"
+fi
 
 submit_batch() {
     local constraint=$1
@@ -31,7 +50,7 @@ submit_batch() {
     sim_dirs=$(IFS=':'; echo "${dirs[*]}")
 
     echo "  Submitting: $job_name ($n tasks, time=$time)"
-    sbatch --constraint="$constraint" --time="$time" \
+    sbatch "${SBATCH_EXTRA[@]}" --constraint="$constraint" --time="$time" \
         --ntasks-per-node="$n" --gres=gpu:"$n" \
         --export=ALL,SIM_DIRS="$sim_dirs" \
         --job-name="$job_name" \
@@ -42,12 +61,12 @@ submit_batch() {
 declare -A SHORT_NAME=(
     [no_aerosols]="noaer"
     [no_gases]="nogas"
-    [dark_ocean]="dark"
+    [prescribed_fluxes]="pflux"
 )
 
-echo "=== Complexity experiments: 20140325_t03 ==="
+echo "=== Complexity experiments: 20140325_t03 ===${DEBUG:+ (DEBUG)}"
 
-for exp in no_aerosols no_gases dark_ocean; do
+for exp in no_aerosols no_gases prescribed_fluxes; do
     [[ -n "$TARGET_EXP" && "$exp" != "$TARGET_EXP" ]] && continue
 
     short="${SHORT_NAME[$exp]}"
@@ -68,4 +87,4 @@ for exp in no_aerosols no_gases dark_ocean; do
 done
 
 echo ""
-echo "Done. $([ -n "$TARGET_EXP" ] && echo "1 experiment" || echo "All 3 experiments") submitted (6 jobs × 3 GPUs each = 18 simulations)."
+echo "Done. $([ -n "$TARGET_EXP" ] && echo "1 experiment" || echo "All 3 experiments") submitted."
