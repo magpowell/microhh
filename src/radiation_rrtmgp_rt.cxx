@@ -637,14 +637,6 @@ void Radiation_rrtmgp_rt<TF>::create(
     if (thermo.get_switch() != Thermo_type::Moist)
         throw std::runtime_error("Radiation_rrtmgp_rt only supports swthermo=moist.");
 
-    // Check if grid is equidistant.
-    const TF dz0 = gd.dz[gd.kstart];
-    for (int k=gd.kstart+1; k<gd.kend; ++k)
-    {
-        if (std::abs(gd.dz[k] - dz0) > Constants::dsmall)
-            throw std::runtime_error("Radiation_rrtmgp_rt requires an equidistant vertical grid.");
-    }
-
     // Setup timedependent gasses
     const TF offset = 0;
     std::string timedep_dim = "time_rad";

@@ -1594,6 +1594,44 @@ void Radiation_rrtmgp_rt<TF>::exec_shortwave_rt(
     const Vector<Float> grid_d = {gd.dx, gd.dy, gd.dz[gd.kstart]};
     const Vector<int> kn_grid = {kngrid_i, kngrid_j, kngrid_k};
 
+    Array<Float,1> z_lev({n_lev});
+    for (int k=0; k<n_lev; ++k)
+        z_lev({k+1}) = gd.zh[gd.kstart+k] - gd.zh[gd.kstart];
+
+    Array<Float,1> kn_z_lev({kngrid_k+1});
+    const Float fz = Float(gd.ktot) / Float(kngrid_k);
+    for (int k=0; k<kngrid_k; ++k)
+        kn_z_lev({k+1}) = z_lev({static_cast<int>(k*fz)+1});
+    kn_z_lev({kngrid_k+1}) = z_lev({n_lev});
+
+    Float dz_min = gd.dz[gd.kstart];
+    for (int k=gd.kstart; k<gd.kend; ++k)
+        dz_min = std::min(dz_min, Float(gd.dz[k]));
+
+    const Float zsize = z_lev({n_lev});
+    const int lut_size = static_cast<int>(std::ceil(zsize/dz_min));
+    const Float lut_dz = zsize / lut_size;
+
+    Array<int,1> z_lut({lut_size});
+    Array<int,1> kn_z_lut({lut_size});
+    for (int n=0; n<lut_size; ++n)
+    {
+        const Float z = n*lut_dz;
+        int k = 0;
+        while (k < gd.ktot-1 && z >= z_lev({k+2}))
+            ++k;
+        z_lut({n+1}) = k;
+        k = 0;
+        while (k < kngrid_k-1 && z >= kn_z_lev({k+2}))
+            ++k;
+        kn_z_lut({n+1}) = k;
+    }
+
+    Array_gpu<Float,1> z_lev_g(z_lev);
+    Array_gpu<Float,1> kn_z_lev_g(kn_z_lev);
+    Array_gpu<int,1> z_lut_g(z_lut);
+    Array_gpu<int,1> kn_z_lut_g(kn_z_lut);
+
     // initiate flux & heating rate arrays to 0
     Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(gd.jmax, gd.imax, rt_flux_tod_dn.ptr());
     Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(gd.jmax, gd.imax, rt_flux_tod_up.ptr());
@@ -1836,6 +1874,8 @@ void Radiation_rrtmgp_rt<TF>::exec_shortwave_rt(
                     igpt,
                     this->rays_per_pixel,
                     grid_cells, grid_d, kn_grid,
+                    z_lev_g, kn_z_lev_g, z_lut_g, kn_z_lut_g,
+                    lut_dz, zsize,
                     mie_cdfs_sub,
                     mie_angs_sub,
                     dynamic_cast<Optical_props_2str_rt&>(*optical_props).get_tau(),
