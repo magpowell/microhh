@@ -12,3 +12,6 @@ build_gpu/
 
 # Agentic handoff docs -- never commit these
 cases/HANDOFF_*.md
+
+# site data staged outside git
+shared_data/

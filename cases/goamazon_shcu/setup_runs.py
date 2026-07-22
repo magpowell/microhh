@@ -28,12 +28,17 @@ import os
 import subprocess
 from pathlib import Path
 
-MICROHH_DIR = Path("/global/homes/m/mpowell/repos/microhh")
+# Derived from this file's own location (cases/goamazon_shcu/setup_runs.py ->
+# repo root), so the case travels between machines without editing.
+# $MICROHH_DIR still wins if set, for out-of-tree checkouts.
+MICROHH_DIR = Path(os.environ.get("MICROHH_DIR", Path(__file__).resolve().parents[2]))
 CASE_DIR    = MICROHH_DIR / "cases" / "goamazon_shcu"
-SCRATCH     = Path(os.environ.get("SCRATCH", "/pscratch/sd/m/mpowell"))
+SCRATCH     = Path(os.environ.get("SCRATCH", f"/mnt/lustre/columbia/{os.environ.get('USER','')}"))
 RUN_ROOT    = SCRATCH / "GOAMAZON_SHCU_LES"
 
-XR_PY = "/global/homes/m/mpowell/.conda/envs/xr_env/bin/python"
+# Python with xarray/netCDF4/scipy. Empire AI Alpha has no system scientific
+# stack, so this is a mamba env; override with $XR_PY elsewhere.
+XR_PY = os.environ.get("XR_PY", f"{Path.home()}/miniforge3/envs/microhh/bin/python")
 
 RADS = ["2stream", "raytracer"]
 REPS = [1, 2, 3, 4]
