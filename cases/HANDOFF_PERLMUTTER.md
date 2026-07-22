@@ -5,31 +5,24 @@ data, or read it from the Alpha checkout.
 
 ## The one thing that matters: two code versions are now in play
 
-`mpowell-local` has been merged with upstream and the `rte-rrtmgp-cpp`
-submodule bumped from `416a6706` to `a969650c` (216 commits). Clean merge, no
-conflicts, `swqsqg_to_rad` survived intact.
+`mpowell-local` has been merged with upstream `microhh/main`, so the code is
+current and the raytracer submodule stays pinned at `416a6706` -- the same
+commit upstream microhh pins, and what a fresh `clone --recursive` gives anyone.
+Clean merge, no conflicts, `swqsqg_to_rad` intact.
 
-That creates a split, because CASS is **not** finished -- more experiments are
-expected -- and its existing Perlmutter reps were produced with the old code:
+Do NOT bump the raytracer submodule to its own main (`a969650c`, 216 commits
+ahead). Upstream microhh has not adopted it, so it is not the tested
+combination, and it changes the `trace_rays` API (extra args) and needs a
+double-precision fix (`find_index` typed `float` not `Float`). None of that is
+worth carrying in production. The nonuniform-dz feature is developed against
+`a969650c` on its own branch because a PR to `microhh/rte-rrtmgp-cpp` targets
+that repo's main; production and CASS have no reason to follow.
 
-| Work | Code version | Why |
-|---|---|---|
-| New CASS members | **old**, tag `cass-baseline-pre-rrtmgp-bump` (submodule `416a6706`) | must match the existing CASS ensemble |
-| goamazon raytracer reruns | **new** (`a969650c` + nonuniform dz once merged) | uniform dz is too expensive, see below |
-| arm97sd, goamazon_shcu | new | nothing completed anywhere yet |
-
-Do not try to serve both from one working tree by checking commits back and
-forth. Use a worktree:
-
-```bash
-git worktree add ../microhh-cass cass-baseline-pre-rrtmgp-bump
-cd ../microhh-cass && git submodule update --init --recursive
-# build into its own build dir; keep the binaries separate
-```
-
-Keep a copy of each built binary somewhere outside the build dir. On Alpha
-that is `~/validated_builds/` with a README recording the microhh commit,
-submodule commit, toolchain and what was validated. Same idea works here.
+CASS is **not** finished -- more experiments expected -- and its reps were
+built at `416a6706`, which is exactly where production still sits, so there is
+no version split to manage. Keep a copy of each built binary outside the build
+dir; on Alpha that is `~/validated_builds/` with a README recording the microhh
+commit, submodule commit, toolchain and what was validated.
 
 ## Do not rebuild under a live restart chain
 
