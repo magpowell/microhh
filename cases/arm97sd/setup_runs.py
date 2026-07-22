@@ -21,6 +21,7 @@ import argparse
 import configparser
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 # Derived from this file's own location (cases/arm97sd/setup_runs.py -> repo
@@ -28,12 +29,15 @@ from pathlib import Path
 # still wins if set, for out-of-tree checkouts.
 MICROHH_DIR = Path(os.environ.get("MICROHH_DIR", Path(__file__).resolve().parents[2]))
 CASE_DIR    = MICROHH_DIR / "cases" / "arm97sd"
-SCRATCH     = Path(os.environ.get("SCRATCH", f"/mnt/lustre/columbia/{os.environ.get('USER','')}"))
+if "SCRATCH" not in os.environ:
+    raise SystemExit("SCRATCH is not set. Source the env script for this machine, "
+                     "e.g. config/empireai_alpha_env.sh on Empire AI Alpha.")
+SCRATCH     = Path(os.environ["SCRATCH"])
 RUN_ROOT    = SCRATCH / "ARM97SD_LES"
 
 # Python with xarray/netCDF4/scipy. Empire AI Alpha has no system scientific
 # stack, so this is a mamba env; override with $XR_PY elsewhere.
-XR_PY = os.environ.get("XR_PY", f"{Path.home()}/miniforge3/envs/microhh/bin/python")
+XR_PY = os.environ.get("XR_PY", sys.executable)
 
 # E3SM IOP forcing. On NERSC this lived in /global/cfs .../inputdata; it is also
 # public on the LCRC E3SM inputdata mirror, so it is kept in-repo under
