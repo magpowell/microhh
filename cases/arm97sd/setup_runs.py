@@ -64,6 +64,40 @@ GRID_PRESETS = {
     "dbg64_k384": ("64", "64", "384", "12800", "12800"),   # dz=66.7
     "dbg64_k512": ("64", "64", "512", "12800", "12800"),   # dz=50
 }
+
+# Stretched vertical grids (non-uniform dz raytracer): dz0 up to z_fine, then
+# geometric growth capped at dz_max, rescaled to land exactly on zsize.
+# name: (itot, jtot, xsize, ysize, dz0, z_fine, growth, dz_max)
+STRETCH_PRESETS = {
+    "dz67s":      ("512", "512", "102400", "102400", 66.6667, 4000.0, 1.025, 400.0),
+    "dbg64_s":    ("64",  "64",  "12800",  "12800",  66.6667, 4000.0, 1.025, 400.0),
+}
+ZSIZE = 25600.0
+
+
+def stretched_z(dz0, z_fine, growth, dz_max, zsize=ZSIZE):
+    import numpy as np
+    dz = []
+    z_now = 0.0
+    while z_now + dz0 <= z_fine + 1e-6:
+        dz.append(dz0)
+        z_now += dz0
+    d = dz0
+    while z_now < zsize:
+        d = min(d * growth, dz_max)
+        dz.append(d)
+        z_now += d
+    dz = np.array(dz) * (zsize / z_now)
+    zh = np.concatenate(([0.0], np.cumsum(dz)))
+    return 0.5 * (zh[:-1] + zh[1:])
+
+
+def stretch_grid_tuple(name):
+    itot, jtot, xsize, ysize, dz0, z_fine, growth, dz_max = STRETCH_PRESETS[name]
+    z = stretched_z(dz0, z_fine, growth, dz_max)
+    return (itot, jtot, str(len(z)), xsize, ysize), z
+
+
 FIT_TEST_GRIDS = list(GRID_PRESETS)
 
 DEBUG_GRID = ("64", "64", "256", "12800", "12800")
@@ -135,7 +169,8 @@ def merge_ini(rt: str, rndseed: int, grid: tuple, fit_test: bool,
 
 
 def setup_run(run_dir: Path, rt: str, rndseed: int, grid: tuple,
-              fit_test: bool, dry_run: bool, endtime: float = None):
+              fit_test: bool, dry_run: bool, endtime: float = None,
+              z_grid=None):
     print(f"\n--- {run_dir.relative_to(RUN_ROOT)} ---")
     if not dry_run:
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -148,6 +183,13 @@ def setup_run(run_dir: Path, rt: str, rndseed: int, grid: tuple,
             cfg.write(fh)
         print(f"  wrote arm97sd.ini (rt={rt}, seed={rndseed}, "
               f"grid={'x'.join(grid[:3])})")
+        zgrid_file = run_dir / "zgrid.txt"
+        if z_grid is not None:
+            import numpy as np
+            np.savetxt(zgrid_file, z_grid, fmt="%.8f")
+            print(f"  wrote zgrid.txt ({len(z_grid)} stretched levels)")
+        elif zgrid_file.exists():
+            zgrid_file.unlink()
 
     symlink(MICROHH_DIR / "build_gpu" / "microhh", run_dir / "microhh", dry_run)
     for name, src in SHARED_SCRIPTS:
@@ -175,40 +217,50 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    all_grids = list(GRID_PRESETS) + list(STRETCH_PRESETS)
     parser.add_argument("--fit-test", action="store_true",
                         help="one raytracer run per grid preset, endtime=1800")
-    parser.add_argument("--grids", nargs="+", choices=GRID_PRESETS, default=None,
+    parser.add_argument("--grids", nargs="+", choices=all_grids, default=None,
                         help="fit-test only: restrict to these presets")
     parser.add_argument("--endtime", type=float, default=None,
                         help="fit-test only: override endtime (default 1800 s)")
     parser.add_argument("--debug", action="store_true",
                         help="64x64 columns, rep_01 only")
-    parser.add_argument("--grid", default="dz67_k384", choices=GRID_PRESETS,
+    parser.add_argument("--grid", default="dz67_k384", choices=all_grids,
                         help="grid preset for production/debug runs")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
+    def resolve(gname):
+        if gname in STRETCH_PRESETS:
+            return stretch_grid_tuple(gname)
+        return GRID_PRESETS[gname], None
+
     if args.fit_test:
         for gname in (args.grids or FIT_TEST_GRIDS):
+            grid, z_grid = resolve(gname)
             run_dir = RUN_ROOT / "fit_test" / gname / "raytracer"
-            setup_run(run_dir, "raytracer", 1, GRID_PRESETS[gname],
-                      fit_test=True, dry_run=args.dry_run, endtime=args.endtime)
+            setup_run(run_dir, "raytracer", 1, grid,
+                      fit_test=True, dry_run=args.dry_run, endtime=args.endtime,
+                      z_grid=z_grid)
         print("\nDone. Submit with submit_fit_test.sh")
         return
 
     if args.debug:
+        grid, z_grid = resolve(args.grid) if args.grid != "dz67_k384" else (DEBUG_GRID, None)
         for rt in RADS:
             run_dir = RUN_ROOT / "debug" / rt / "rep_01"
-            setup_run(run_dir, rt, 1, DEBUG_GRID,
-                      fit_test=False, dry_run=args.dry_run)
+            setup_run(run_dir, rt, 1, grid,
+                      fit_test=False, dry_run=args.dry_run, z_grid=z_grid)
         print("\nDone. Debug dirs ready.")
         return
 
+    grid, z_grid = resolve(args.grid)
     for rt in RADS:
         for rep in REPS:
             run_dir = RUN_ROOT / "base" / rt / f"rep_{rep:02d}"
-            setup_run(run_dir, rt, rep, GRID_PRESETS[args.grid],
-                      fit_test=False, dry_run=args.dry_run)
+            setup_run(run_dir, rt, rep, grid,
+                      fit_test=False, dry_run=args.dry_run, z_grid=z_grid)
     print("\nDone. Submit with submit_production.sh")
 
 

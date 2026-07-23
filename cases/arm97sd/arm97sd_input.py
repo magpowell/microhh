@@ -17,6 +17,8 @@ Mirrors the DP-SCREAM ARM97 forcing treatment (and the GoAmazon sibling case):
 Reads arm97sd.ini from CWD (ktot, zsize, endtime) -- run from the run dir.
 """
 
+import os
+
 import numpy as np
 import netCDF4 as nc
 import xarray as xr
@@ -72,8 +74,13 @@ with open('arm97sd.ini') as f:
             if section == '[time]' and key == 'endtime':
                 endtime = float(val)
 
-dz = zsize / kmax
-z = np.linspace(0.5*dz, zsize - 0.5*dz, kmax)
+if os.path.exists('zgrid.txt'):
+    z = np.loadtxt('zgrid.txt')
+    if len(z) != kmax:
+        raise SystemExit(f'zgrid.txt has {len(z)} levels but ktot={kmax}')
+else:
+    dz = zsize / kmax
+    z = np.linspace(0.5*dz, zsize - 0.5*dz, kmax)
 
 # -----------------------------------------------------------------------
 # Read IOP file; subset the sim window; reorder levels bottom->top
@@ -290,7 +297,9 @@ add_nc_var('prec',  ('time',), grp_val, iop['Prec'].values)
 f.close()
 
 print("Successfully created arm97sd_input.nc")
-print(f"   grid: ktot={kmax}, dz={dz:.1f} m, zsize={zsize:.0f} m")
+zh_ = np.concatenate(([0.], 0.5*(z[1:]+z[:-1]), [zsize]))
+dz_ = np.diff(zh_)
+print(f"   grid: ktot={kmax}, dz={dz_.min():.1f}-{dz_.max():.1f} m, zsize={zsize:.0f} m")
 print(f"   forcings: t = {time_ls[0]:.0f} to {time_ls[-1]:.0f} s ({n_t} times)")
 print(f"   nudging: u,v -> IOP u/v, tau={TAU_NUDGE:.0f} s")
 print(f"   init surface: thl={thl0[0]:.2f} K, qt={qt0[0]*1e3:.2f} g/kg, "
