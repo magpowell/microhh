@@ -22,8 +22,9 @@ import numpy as np
 import xarray as xr
 import netCDF4
 from scipy import ndimage
-
-LST_OFFSET = 5.5
+import sys
+sys.path.insert(0, "/global/homes/m/mpowell/repos/microhh/cases/cass/analysis")
+from cass_analysis import LST_OFFSET  # noqa: E402  (local apparent solar time)
 
 QL_THRESH = 1e-5     # kg/kg — cloud definition (H&J use 0.01 g/kg = 1e-5)
 N_DIL     = 2        # subsiding-shell: within N_DIL cells of any cloud

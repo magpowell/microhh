@@ -53,6 +53,7 @@ eps_v = 0.608  # R_v/R_d - 1  (virtual-temperature coefficient)
 CASS_LAT = 36.5    # ARM SGP latitude [deg N]
 CASS_LON = -97.5   # ARM SGP longitude [deg E]
 CASS_DOY = 205     # July 24
+CASS_UTC_START_H = 10.5   # sim t=0 = 2005-07-24 10:30 UTC ([time] datetime_utc)
 
 # ── Simulation time helpers ──────────────────────────────────────────────────
 # The canonical analysis time axis is LOCAL APPARENT SOLAR TIME (solar noon =
@@ -97,6 +98,30 @@ def dump_t_to_lst(dump_t_ns):
 def sim_time_to_lst(t_sec):
     """Convert simulation seconds to LOCAL APPARENT SOLAR TIME (hours)."""
     return np.asarray(t_sec) / 3600.0 + LST_OFFSET
+
+
+def solar_azimuth_deg(t_sec, lat_deg=CASS_LAT, lon_deg=CASS_LON,
+                      doy_start=CASS_DOY, hour_utc_start=CASS_UTC_START_H):
+    """Solar azimuth (deg from N, clockwise) at simulation time t_sec (NOAA SPA, ~0.5 deg)."""
+    hour_utc_cont = hour_utc_start + np.asarray(t_sec, dtype=float) / 3600.0
+    doy_cont = doy_start + hour_utc_cont / 24.0
+    gamma = 2.0 * np.pi / 365.0 * (doy_cont - 1.0)
+    eqtime = 229.18 * (0.000075
+                       + 0.001868 * np.cos(gamma)
+                       - 0.032077 * np.sin(gamma)
+                       - 0.014615 * np.cos(2.0 * gamma)
+                       - 0.040849 * np.sin(2.0 * gamma))
+    decl = (0.006918
+            - 0.399912 * np.cos(gamma) + 0.070257 * np.sin(gamma)
+            - 0.006758 * np.cos(2.0 * gamma) + 0.000907 * np.sin(2.0 * gamma)
+            - 0.002697 * np.cos(3.0 * gamma) + 0.00148 * np.sin(3.0 * gamma))
+    hour_utc = hour_utc_cont % 24.0
+    tst = hour_utc * 60.0 + eqtime + 4.0 * lon_deg
+    ha = np.radians(tst / 4.0 - 180.0)
+    lat = np.radians(lat_deg)
+    az = np.arctan2(-np.cos(decl) * np.sin(ha),
+                    np.sin(decl) * np.cos(lat) - np.cos(decl) * np.sin(lat) * np.cos(ha))
+    return np.degrees(np.mod(az, 2.0 * np.pi))
 
 
 def zenith_angle(lst_h, lat=CASS_LAT, doy=CASS_DOY):
@@ -297,6 +322,8 @@ def _load_stats_segment(stats_path: Path, run_dir: Path) -> xr.Dataset:
         },
     )
     out["t_local"] = ("time", t_local)
+    if "w" in ds_dyn:   # mask-conditioned mean w (present in cass.<mask>.*.nc files)
+        out["w"] = (("time", "zh"), ds_dyn["w"].values)
     for d in (ds_root, ds_lsm, ds_rad, ds_thm, ds_dyn):
         d.close()
     return out

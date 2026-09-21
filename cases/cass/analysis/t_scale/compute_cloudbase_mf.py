@@ -45,9 +45,8 @@ import xarray as xr
 
 CASS_ANALYSIS = Path("/global/homes/m/mpowell/repos/microhh/cases/cass/analysis")
 sys.path.insert(0, str(CASS_ANALYSIS))
-from cass_analysis import load_3d_nc  # noqa: E402
+from cass_analysis import load_3d_nc, LST_OFFSET as LST0  # noqa: E402
 
-LST0    = 5.5      # h : sim t=0 → 05:30 LST
 QL_THR  = 1e-5     # kg/kg : in-cloud threshold
 
 

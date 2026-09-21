@@ -21,8 +21,9 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
-
-LST_OFFSET = 5.5   # h: simulation t = 0 → 05:30 LST
+import sys
+sys.path.insert(0, "/global/homes/m/mpowell/repos/microhh/cases/cass/analysis")
+from cass_analysis import LST_OFFSET  # noqa: E402  (local apparent solar time)
 
 
 def acf_fft(X, nlags):

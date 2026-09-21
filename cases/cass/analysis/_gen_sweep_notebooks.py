@@ -1,8 +1,9 @@
 """Generate sweep comparison notebooks.
 
 Usage: python _gen_sweep_notebooks.py [group1 group2 ...]
-If no groups given, regenerates all. Valid groups: cs_veg, soil_moisture,
-wind_u, wind_geo, rs_scale.
+Groups must be given explicitly (no-arg regeneration is disabled because
+wind_geo_comparison.ipynb is hand-edited and would be overwritten).
+Valid groups: cs_veg, soil_moisture, wind_u, wind_geo, rs_scale.
 """
 
 import json
@@ -11,7 +12,10 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 _ALL_GROUPS = ("cs_veg", "soil_moisture", "wind_u", "wind_geo", "rs_scale")
-_TARGETS = set(sys.argv[1:]) if len(sys.argv) > 1 else set(_ALL_GROUPS)
+if len(sys.argv) < 2:
+    sys.exit("usage: _gen_sweep_notebooks.py group [group ...]  "
+             "(no-arg regeneration disabled: wind_geo_comparison.ipynb is hand-edited)")
+_TARGETS = set(sys.argv[1:])
 
 
 # ── Notebook building helpers ─────────────────────────────────────────────────

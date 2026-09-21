@@ -7,6 +7,7 @@ Location: 36.5N, 97.5W (ARM SGP central facility)
 Day: July 24 (DOY 205)
 """
 
+from datetime import datetime
 import argparse
 import numpy as np
 import netCDF4 as nc
@@ -49,13 +50,13 @@ if args.sun_wind is not None and (args.zero_winds or args.wind_u is not None or 
 float_type = "f8"
 
 
-def solar_azimuth_deg(t_sec, lat_deg, lon_deg, doy_start=205, hour_utc_start=12.0):
+def solar_azimuth_deg(t_sec, lat_deg, lon_deg, doy_start, hour_utc_start):
     """Solar azimuth (deg from N, clockwise) at simulation time t_sec.
 
     NOAA Solar Position Algorithm (simplified; accurate to ~0.5 deg).
-    For CASS: t=0 corresponds to day 205.5 = July 24, 12:00 UTC, so
-    defaults doy_start=205 and hour_utc_start=12.0 are correct. Accepts
-    scalar or numpy array t_sec.
+    doy_start / hour_utc_start come from [time] datetime_utc in cass.ini; no
+    defaults, because a hardcoded 12:00 UTC origin misaligned the wind_sun runs.
+    Accepts scalar or numpy array t_sec.
     """
     hour_utc_cont = hour_utc_start + np.asarray(t_sec, dtype=float) / 3600.0
     doy_cont = doy_start + hour_utc_cont / 24.0
@@ -98,14 +99,15 @@ def add_nc_dim(name, size, nc):
 # Get number of vertical levels, size, and lat/lon from .ini file
 lat = None
 lon = None
+datetime_utc = None
 with open('cass.ini') as f:
-    in_grid_section = False
+    section = None
     for line in f:
         line_stripped = line.strip()
         if line_stripped.startswith('['):
-            in_grid_section = (line_stripped == '[grid]')
-        if in_grid_section:
-            key = line.split('=')[0].strip()
+            section = line_stripped
+        key = line.split('=')[0].strip()
+        if section == '[grid]':
             if key == 'ktot':
                 kmax = int(line.split('=')[1])
             if key == 'zsize':
@@ -114,6 +116,14 @@ with open('cass.ini') as f:
                 lat = float(line.split('=')[1])
             if key == 'lon':
                 lon = float(line.split('=')[1])
+        elif section == '[time]' and key == 'datetime_utc':
+            datetime_utc = line.split('=', 1)[1].split('#')[0].strip()
+
+if datetime_utc is None:
+    raise RuntimeError("[time] datetime_utc missing from cass.ini (needed for the solar azimuth)")
+_dt0 = datetime.strptime(datetime_utc, '%Y-%m-%d %H:%M:%S')
+doy_start = _dt0.timetuple().tm_yday
+hour_utc_start = _dt0.hour + _dt0.minute / 60. + _dt0.second / 3600.
 
 dz = zsize / kmax
 
@@ -298,7 +308,7 @@ elif args.wind_u is not None:
 elif args.geo_wind is not None:
     u_init = np.full(kmax, args.geo_wind); v_init = np.zeros(kmax)
 elif args.sun_wind is not None:
-    az0 = np.radians(solar_azimuth_deg(0.0, lat, lon))
+    az0 = np.radians(solar_azimuth_deg(0.0, lat, lon, doy_start, hour_utc_start))
     u_init = np.full(kmax, -args.sun_wind * np.sin(az0))
     v_init = np.full(kmax, -args.sun_wind * np.cos(az0))
 else:
@@ -339,7 +349,7 @@ elif args.wind_u is not None:
 elif args.geo_wind is not None:
     u_nudge_arr = np.full_like(uls, args.geo_wind); v_nudge_arr = np.zeros_like(vls)
 elif args.sun_wind is not None:
-    az_t = np.radians(solar_azimuth_deg(time_ls, lat, lon))
+    az_t = np.radians(solar_azimuth_deg(time_ls, lat, lon, doy_start, hour_utc_start))
     u_target = -args.sun_wind * np.sin(az_t)   # shape (n_times,)
     v_target = -args.sun_wind * np.cos(az_t)
     u_nudge_arr = np.broadcast_to(u_target[:, None], (n_times, kmax)).copy()

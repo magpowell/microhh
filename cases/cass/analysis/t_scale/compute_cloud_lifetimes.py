@@ -35,28 +35,10 @@ import pandas as pd
 import xarray as xr
 import tobac
 import tobac.merge_split  # noqa: F401  (submodule must be imported explicitly)
+import sys
+sys.path.insert(0, "/global/homes/m/mpowell/repos/microhh/cases/cass/analysis")
+from cass_analysis import solar_azimuth_deg, sim_time_to_lst  # noqa: E402
 
-LST_OFFSET = 5.5   # h: simulation t=0 → 05:30 LST
-
-
-def solar_azimuth_deg(t_sec, lat_deg, lon_deg, doy_start=205, hour_utc_start=12.0):
-    """Solar azimuth (deg from N, clockwise). NOAA algorithm; matches cass_input.py.
-    CASS: t=0 → day 205.5 = July 24, 12:00 UTC (defaults). Scalar or array t_sec."""
-    hour_utc_cont = hour_utc_start + np.asarray(t_sec, dtype=float) / 3600.0
-    doy_cont = doy_start + hour_utc_cont / 24.0
-    gamma = 2.0 * np.pi / 365.0 * (doy_cont - 1.0)
-    eqtime = 229.18 * (0.000075 + 0.001868 * np.cos(gamma) - 0.032077 * np.sin(gamma)
-                       - 0.014615 * np.cos(2 * gamma) - 0.040849 * np.sin(2 * gamma))
-    decl = (0.006918 - 0.399912 * np.cos(gamma) + 0.070257 * np.sin(gamma)
-            - 0.006758 * np.cos(2 * gamma) + 0.000907 * np.sin(2 * gamma)
-            - 0.002697 * np.cos(3 * gamma) + 0.00148 * np.sin(3 * gamma))
-    hour_utc = hour_utc_cont % 24.0
-    tst = hour_utc * 60.0 + eqtime + 4.0 * lon_deg
-    ha = np.radians(tst / 4.0 - 180.0)
-    lat = np.radians(lat_deg)
-    az = np.arctan2(-np.cos(decl) * np.sin(ha),
-                    np.sin(decl) * np.cos(lat) - np.cos(decl) * np.sin(lat) * np.cos(ha))
-    return np.degrees(np.mod(az, 2.0 * np.pi))
 
 
 def load_qlp(path: Path) -> tuple[xr.DataArray, np.ndarray, float, float]:
@@ -291,7 +273,7 @@ def lifetime_timeseries(track_summary: pd.DataFrame, t_sim_s: np.ndarray) -> xr.
             med_life[f]  = float(np.median(lt[mask]))
             p90_life[f]  = float(np.percentile(lt[mask], 90))
             n_active[f]  = int(mask.sum())
-    t_lst = t_sim_s / 3600.0 + LST_OFFSET
+    t_lst = sim_time_to_lst(t_sim_s)
     return xr.Dataset(
         {"lifetime_mean":   (("time",), mean_life),
          "lifetime_median": (("time",), med_life),

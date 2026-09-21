@@ -21,7 +21,7 @@ CASS_ROOT = Path('/global/homes/m/mpowell/repos/microhh/cases/cass')
 sys.path.insert(0, str(CASS_ROOT / 'analysis'))
 sys.path.insert(0, str(CASS_ROOT / 'analysis' / 'updrafts'))
 
-from cass_analysis import load_3d_nc, load_stats
+from cass_analysis import load_3d_nc, load_stats, LST_OFFSET
 from diagnostics  import _per_time_z_b_z_t
 
 EXPT      = 'no_aerosols_zero_wind_v2'
@@ -30,7 +30,6 @@ CACHE_DIR = Path('/pscratch/sd/m/mpowell/CASS_LES/analysis/cache/couvreux_column
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 QL_TH      = 1e-5
-LST_OFFSET = 5.5
 
 
 def per_rep(rt, rep_idx):

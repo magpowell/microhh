@@ -22,6 +22,8 @@ import numpy as np
 import xarray as xr
 import netCDF4
 from scipy import ndimage
+sys.path.insert(0, "/global/homes/m/mpowell/repos/microhh/cases/cass/analysis")
+from cass_analysis import LST_OFFSET  # noqa: E402  (local apparent solar time)
 
 # Physical constants
 CP      = 1005.0
@@ -30,7 +32,6 @@ LV      = 2.5e6
 RD_CP   = 0.286          # R_d / c_p (dry air)
 P_REF   = 1.0e5          # Pa
 EPS_V   = 0.608          # R_v/R_d - 1
-LST_OFFSET = 5.5
 
 # Algorithm thresholds (Gentine et al. 2016 defaults)
 QL_THRESH         = 1e-5       # kg/kg (defines cloudy levels within a plume)

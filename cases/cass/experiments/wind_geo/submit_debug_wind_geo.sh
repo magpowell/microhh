@@ -1,7 +1,7 @@
 #!/bin/bash
 # Set up and submit debug runs for wind_geo experiment.
 # Usage: submit_debug_wind_geo.sh [u_value ...]
-# Default: all five values including u=0 (0.0 2.5 5.0 7.5 10.0)
+# Default: 2.5 5.0 7.5 10.0 (u=0 is covered by no_aerosols_zero_wind)
 set -euo pipefail
 
 SCRATCH=${SCRATCH:-/pscratch/sd/m/mpowell}

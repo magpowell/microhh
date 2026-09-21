@@ -6,10 +6,11 @@ Creates:
   $SCRATCH/CASS_LES/experiments/wind_geo/u_{VALUE}/{2stream,raytracer}/rep_{01..04}/
 
 Parameter values (geostrophic wind u_geo, m/s):
-  0.0, 2.5, 5.0, 7.5, 10.0
+  2.5, 5.0, 7.5, 10.0   (u=0 is no_aerosols_zero_wind_v2, aliased as wind_geo_0 in analysis/catalog.py)
 
 Forcing: swlspres=geo (base default) with u_geo=VALUE constant in z, v_geo=0.
-The Ekman spiral develops naturally from the geostrophic forcing.
+The Ekman spiral develops from the geostrophic forcing, but note that cass_input.py
+also nudges u,v toward the uniform (u_geo, 0) profile on 10800 s ([force] swnudge=1).
 No uflux override; nudgelist retains u,v (base defaults).
 
 INI overlays on top of base:
@@ -79,7 +80,7 @@ def symlink(src: Path, dst: Path, dry_run: bool):
 DEBUG_GRID = {"itot": "64", "jtot": "64", "xsize": "6400.", "ysize": "6400."}
 
 
-def merge_ini(rndseed: int, rt: str, u_val: float, debug: bool = False) -> configparser.ConfigParser:
+def merge_ini(rndseed: int, rt: str, debug: bool = False) -> configparser.ConfigParser:
     cfg = configparser.ConfigParser(
         interpolation=None,
         comment_prefixes=("#", ";"),
@@ -118,7 +119,7 @@ def setup_rep(u_val: float, rt: str, rep: int, dry_run: bool, debug: bool = Fals
     if not dry_run:
         run_dir.mkdir(parents=True, exist_ok=True)
 
-    cfg = merge_ini(rndseed=rep, rt=rt, u_val=u_val, debug=debug)
+    cfg = merge_ini(rndseed=rep, rt=rt, debug=debug)
     if dry_run:
         print(f"  [dry] write cass.ini  (rndseed={rep}, geo_wind={u_val})")
     else:

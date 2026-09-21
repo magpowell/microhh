@@ -111,7 +111,7 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False) -> configparser.Config
     # that leaves domain-mean stats (ql_cover, qlqi_path, thl, qt, ...) all zero/NaN.
     masklist = cfg.get("stats", "masklist", fallback="")
     for m in ("couvreux", "wplus", "ql"):
-        if m not in masklist:
+        if m not in masklist.split(","):
             masklist += ("," if masklist else "") + m
     cfg.set("stats", "masklist", masklist)
     # include couvreux in 3D dumps for cell-exact offline masking
