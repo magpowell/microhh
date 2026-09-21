@@ -190,3 +190,14 @@ both machines (Perlmutter keeps `m1266`, `gpu&hbm80g` for raytracer legs, and it
 --gres=gpu:1 -c 32 --time=48:00:00`) and 2stream are placed in `shared_gpu_ss11`, the raytracer on an hbm80g node;
 the debug set gets a whole `gpu_ss11` node. Defaults in `site_env.sh` are therefore correct; no change needed.
 Caveat: `debug` allows 2 jobs per user, so `shared/submit.sh <expt> --debug` for one experiment at a time.
+
+**Alpha GPU governance (2026-09-21, found by the smoke test).** Partition `alpha` also holds alphagpu51-54, 8x RTX
+PRO 6000 Blackwell each (feature `rtx6000`, 98 GB, weak FP64). Measured on one: arm97sd 64x64 debug raytracer
+reached 1200 s in 34 min against 24600 s in 30 min on H100 in July (about 20x slower); 2stream about 2x slower.
+The submit plugin `rtx6000_gpu_governance` routes EVERY 1-GPU job there, ignores `--constraint=h100` and
+`--exclude`, and rewrites a typed 1-GPU gres to untyped; only a typed request for >= 2 GPUs is placed on H100/H200
+(verified with `sbatch --test-only`). Consequences: `submit.sh` packs 2 sims per job on Alpha
+(`SITE_GPUS_PER_JOB=2`, `SITE_GPU_TYPE=nvidia_h100_80gb_hbm3`), grouped within an RT mode; the compute estimate
+of section 3 is unchanged in GPU-hours; the arm97sd and goamazon `submit_*_alpha.sh` scripts still submit 1-GPU
+jobs and must be changed the same way before any production use. Test-QoS queue estimate at the time was about
+one day. The smoke test was resubmitted as two 2-GPU H100 jobs (old+new binary side by side per RT mode).
