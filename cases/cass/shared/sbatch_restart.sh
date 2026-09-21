@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #
-# Restart variant of sbatch_run_alpha.sh for Empire AI Alpha. Shared by every
-# CASS experiment; chained by shared/submit_alpha.sh after each raytracer job
-# with --dependency=afterany so it runs whether the parent finished or hit the
-# wall.
+# Restart variant of sbatch_run.sh, same file on Perlmutter and Empire AI
+# Alpha. Shared by every CASS experiment; chained by shared/submit.sh after
+# each raytracer job with --dependency=afterany so it runs whether the parent
+# finished or hit the wall.
 #   - Does NOT delete restart dumps or cass.out; does NOT run init.
 #   - Auto-detects the latest savetime from the restart dumps, verifies all
 #     prognostic vars exist there, patches [time] starttime, then runs.
@@ -18,6 +18,7 @@
 # All site-specific sbatch flags come from the submitting script, since
 # #SBATCH cannot expand $SCRATCH. Exported via --export:
 #   MICROHH_DIR    repo root (sbatch copies this file into the spool dir).
+#   SITE           perlmutter | empireai_alpha, for config/site_env.sh.
 #   SIM_DIRS       colon-separated run directories.
 #   RESTART_VARS   space-separated prognostic set that must exist at the
 #                  restart time. Default is the tracer-bearing rerun config.
@@ -27,7 +28,7 @@ set -uo pipefail
 : "${MICROHH_DIR:?must be exported by the submitting script (--export=ALL,MICROHH_DIR=...)}"
 : "${SIM_DIRS:?must be exported by the submitting script}"
 export RESTART_VARS="${RESTART_VARS:-thl qt ql w u v couvreux qr nr}"
-source "$MICROHH_DIR/config/empireai_alpha_env.sh"
+source "$MICROHH_DIR/config/site_env.sh"
 
 IFS=':' read -ra DIRS <<< "$SIM_DIRS"
 echo "Restarting ${#DIRS[@]} CASS simulation(s) at $(date)"

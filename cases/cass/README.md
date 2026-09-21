@@ -69,25 +69,33 @@ output time axis at the restart point).
 
 ---
 
-## Empire AI Alpha
+## One driver for Perlmutter and Empire AI Alpha
 
-The Perlmutter scripts above pack 4 sims per node and pin log paths to `/pscratch`. On Alpha use the
-shared driver instead, which submits one single-GPU job per (value, RT, rep), passes every site flag at
-submit time, and chains a restart job after each production raytracer rep (standard QoS is capped at 48 h):
+`config/site_env.sh` detects the machine (`NERSC_HOST`, or an `alpha*` hostname) and exports `SCRATCH`,
+`XR_PY`, `MICROHH_EXEC`, and the Slurm account, partition, constraint, QoS and CPU settings for that site.
+`shared/submit.sh` reads those and submits one single-GPU job per (value, RT, rep), passing every site flag
+at submit time, with a chained restart after each production raytracer rep (both production QoS cap at 48 h):
 
 ```bash
-source config/empireai_alpha_env.sh            # SCRATCH, XR_PY, toolchain
-export MICROHH_EXEC=~/validated_builds/<binary> # optional; default build_gpu/microhh
-bash cases/cass/shared/submit_alpha.sh base --debug          # 64x64 smoke test, QoS test
-bash cases/cass/shared/submit_alpha.sh base                  # production, QoS standard
-bash cases/cass/shared/submit_alpha.sh wind_geo -- --values 2.5 10.0
+source config/site_env.sh                       # or SITE=perlmutter source ...
+export MICROHH_EXEC=~/validated_builds/<binary>  # optional; default build_gpu/microhh
+bash cases/cass/shared/submit.sh base --debug    # 64x64 smoke test, debug QoS
+bash cases/cass/shared/submit.sh base            # production
+bash cases/cass/shared/submit.sh wind_geo -- --values 2.5 10.0
 ```
 
-Account `cu_rpincus_illuminating`, partition `alpha`; override `ACCOUNT`, `PARTITION`, `QOS`, `WALLTIME`,
-`TS_WALLTIME`, `GPU_TYPE` in the environment. Bodies: `shared/sbatch_run_alpha.sh` and
-`shared/sbatch_restart_alpha.sh` (both post-process the xy crosses under `$XR_PY` inside the job). Run dirs
-and logs follow the same `$SCRATCH/CASS_LES/` layout as below. The `setup_*.py` scripts locate the repo
-from their own path and require `SCRATCH` to be set, on every machine.
+| | Perlmutter | Empire AI Alpha |
+|---|---|---|
+| account / partition | `m1266` | `cu_rpincus_illuminating`, `alpha` |
+| raytracer legs | `--constraint=gpu&hbm80g` | any node (H100 80 GB fits); `GPU_TYPE=nvidia_h200` to force H200 |
+| QoS prod / debug | `shared` / `debug` | `standard` / `test` |
+| debug wall time | 30 min | 2 h |
+
+Override any of `QOS`, `WALLTIME`, `TS_WALLTIME`, `DEBUG_WALLTIME`, `GPU_TYPE`, or the `SITE_*` variables in the
+environment. Job bodies: `shared/sbatch_run.sh` and `shared/sbatch_restart.sh` (both post-process the xy crosses
+under `$XR_PY` inside the job). Run dirs and logs follow the `$SCRATCH/CASS_LES/` layout below. The `setup_*.py`
+scripts locate the repo from their own path and require `SCRATCH`, on every machine. The per-experiment
+`submit_*.sh` / `sbatch_*.sh` files above are the older Perlmutter node-packed path and still work there.
 
 ---
 

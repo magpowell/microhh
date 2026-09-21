@@ -1,24 +1,26 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #
-# CASS run body for Empire AI Alpha (single GPU per job). Shared by every CASS
-# experiment; submitted by shared/submit_alpha.sh.
+# CASS run body (single GPU per job), same file on Perlmutter and Empire AI
+# Alpha. Shared by every CASS experiment; submitted by shared/submit.sh.
 #
-# Deliberately minimal #SBATCH headers: --account, --partition, --qos, --gres,
-# --ntasks-per-node, --cpus-per-task, --time, --output, --error and --job-name
-# are ALL passed at submit time. Slurm does not expand environment variables
-# inside #SBATCH directives, so hardcoding a log path here is exactly how the
-# Perlmutter scripts ended up pinned to /pscratch.
+# Deliberately minimal #SBATCH headers: --account, --partition, --constraint,
+# --qos, --gres, --ntasks-per-node, --cpus-per-task, --time, --output, --error
+# and --job-name are ALL passed at submit time from config/site_env.sh. Slurm
+# does not expand environment variables inside #SBATCH directives, so hardcoding
+# a log path here is exactly how the old scripts ended up pinned to /pscratch.
 #
 # Exported by the submitting script (--export=ALL,...):
 #   MICROHH_DIR   repo root; sbatch copies this file into Slurm's spool dir, so
 #                 BASH_SOURCE cannot locate the repo from inside the job.
+#   SITE          perlmutter | empireai_alpha (site_env.sh cannot detect the
+#                 site from a compute node's hostname on every cluster).
 #   SIM_DIRS      colon-separated run directories, one per task. With the
 #                 recommended 1-GPU-per-job submission this is a single dir.
 #   GPU_MEM_LOG=1 additionally logs nvidia-smi memory every 10 s.
 #
 # Post-processing (cross_to_nc.py on the xy crosses) runs inside the job under
-# $XR_PY from the env script, as on Perlmutter.
+# $XR_PY from the site layer.
 
 set -uo pipefail
 
@@ -26,9 +28,10 @@ set -uo pipefail
 : "${SIM_DIRS:?must be exported by the submitting script}"
 
 # Compute nodes do not inherit a usable library environment for the netCDF /
-# HDF5 / CUDA stack MicroHH links against. Source it explicitly so a job
+# HDF5 / CUDA stack MicroHH links against (Alpha), and --export=ALL only carries
+# whatever the submitting shell had. Source the site layer explicitly so a job
 # behaves the same whether or not the login shell was set up.
-source "$MICROHH_DIR/config/empireai_alpha_env.sh"
+source "$MICROHH_DIR/config/site_env.sh"
 
 IFS=':' read -ra DIRS <<< "$SIM_DIRS"
 echo "Starting ${#DIRS[@]} CASS simulation(s) at $(date)"
