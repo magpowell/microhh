@@ -12,3 +12,4 @@ build_gpu/
 
 # Agentic handoff docs -- never commit these
 cases/HANDOFF_*.md
+build_gpu_new/
