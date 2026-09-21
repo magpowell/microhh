@@ -13,9 +13,10 @@
 
 set -euo pipefail
 
-SCRATCH_DATA="/pscratch/sd/m/mpowell/CASS_LES/shared_data"
+: "${SCRATCH:?SCRATCH is not set; source the env script for this machine (e.g. config/empireai_alpha_env.sh)}"
+SCRATCH_DATA="$SCRATCH/CASS_LES/shared_data"
 DATA_DIR="$(cd "$(dirname "$0")/data" && pwd)"
-MISC_DIR="/global/homes/m/mpowell/repos/microhh/misc"
+MISC_DIR="$(cd "$(dirname "$0")/../../../misc" && pwd)"
 
 echo "Scratch data dir : $SCRATCH_DATA"
 echo "Shared data dir  : $DATA_DIR"

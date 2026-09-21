@@ -69,6 +69,28 @@ output time axis at the restart point).
 
 ---
 
+## Empire AI Alpha
+
+The Perlmutter scripts above pack 4 sims per node and pin log paths to `/pscratch`. On Alpha use the
+shared driver instead, which submits one single-GPU job per (value, RT, rep), passes every site flag at
+submit time, and chains a restart job after each production raytracer rep (standard QoS is capped at 48 h):
+
+```bash
+source config/empireai_alpha_env.sh            # SCRATCH, XR_PY, toolchain
+export MICROHH_EXEC=~/validated_builds/<binary> # optional; default build_gpu/microhh
+bash cases/cass/shared/submit_alpha.sh base --debug          # 64x64 smoke test, QoS test
+bash cases/cass/shared/submit_alpha.sh base                  # production, QoS standard
+bash cases/cass/shared/submit_alpha.sh wind_geo -- --values 2.5 10.0
+```
+
+Account `cu_rpincus_illuminating`, partition `alpha`; override `ACCOUNT`, `PARTITION`, `QOS`, `WALLTIME`,
+`TS_WALLTIME`, `GPU_TYPE` in the environment. Bodies: `shared/sbatch_run_alpha.sh` and
+`shared/sbatch_restart_alpha.sh` (both post-process the xy crosses under `$XR_PY` inside the job). Run dirs
+and logs follow the same `$SCRATCH/CASS_LES/` layout as below. The `setup_*.py` scripts locate the repo
+from their own path and require `SCRATCH` to be set, on every machine.
+
+---
+
 ## Constraints
 
 | RT type | `--constraint` | Reason |

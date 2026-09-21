@@ -5,10 +5,14 @@ Utility functions for CASS composite case setup.
 from datetime import datetime
 import numpy as np
 import xarray as xr
+import os
 from pathlib import Path
 
 # Absolute path to the composite index file
-COMPOSITE_NC = Path('/global/homes/m/mpowell/repos/microhh/cases/cass/shared/preprocessing/shcu_sgp_summer_97to09.nc')
+# Relative to this module so the case travels between machines; override with
+# $CASS_COMPOSITE_NC if the file lives elsewhere.
+COMPOSITE_NC = Path(os.environ.get('CASS_COMPOSITE_NC',
+                                  Path(__file__).resolve().parent / 'preprocessing' / 'shcu_sgp_summer_97to09.nc'))
 
 
 def read_composite_days(year_min=None, year_max=None, nc_path=None):

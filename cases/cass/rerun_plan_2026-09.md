@@ -172,3 +172,12 @@ Port list for the CASS scaffolding (mirror the arm97sd July port): derive `MICRO
 require `SCRATCH` and `XR_PY` from `config/empireai_alpha_env.sh`, one job per (RT, rep) via `sbatch_runs_alpha.sh`-
 style scripts with chained restarts, drop the Perlmutter `-A m1266`, `hbm80g` constraint and 4-per-node packing,
 QoS as above. The cross_to_nc post-processing step must run inside the job under `XR_PY`.
+
+**Port done (2026-09-21, Alpha checkout).** The seven `setup_*.py` locate the repo from their own path, require
+`SCRATCH`, and honor `MICROHH_EXEC`; `shared/submit_alpha.sh` sets up and submits any experiment as single-GPU
+jobs with chained raytracer restarts; `shared/sbatch_run_alpha.sh` and `shared/sbatch_restart_alpha.sh` are the
+shared job bodies (cross_to_nc under `XR_PY` inside the job); `setup_shared_data.sh`, `cass_utils.py` and the
+READMEs no longer carry NERSC paths. Perlmutter sbatch/submit files, htar scripts and `analysis/` are untouched.
+Not yet validated end to end: the CASS inputs are not staged on Alpha (`shared/data/` symlinks point to
+`/pscratch`), so the Alpha smoke test used arm97sd. Next: a site-detecting env layer and one submit driver for
+both machines (Perlmutter keeps `m1266`, `gpu&hbm80g` for raytracer legs, and its verified QoS names).

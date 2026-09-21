@@ -22,10 +22,28 @@ import subprocess
 import sys
 from pathlib import Path
 
-MICROHH_DIR = Path("/global/homes/m/mpowell/repos/microhh")
+def _repo_root() -> Path:
+    """Repo root from this file's location, so the case travels between machines.
+    Override with $MICROHH_DIR (the Slurm bodies export it explicitly)."""
+    if "MICROHH_DIR" in os.environ:
+        return Path(os.environ["MICROHH_DIR"])
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "cases" / "cass").is_dir() and (parent / "config").is_dir():
+            return parent
+    raise SystemExit("Cannot locate the microhh repo root from %s; set $MICROHH_DIR" % __file__)
+
+
+if "SCRATCH" not in os.environ:
+    raise SystemExit("SCRATCH is not set. Source the env script for this machine "
+                     "(e.g. config/empireai_alpha_env.sh) or export SCRATCH.")
+
+MICROHH_DIR = _repo_root()
+# Binary to run: $MICROHH_EXEC if set (on Alpha the validated copy under
+# ~/validated_builds/), else the in-tree GPU build.
+MICROHH_EXEC = Path(os.environ.get("MICROHH_EXEC", MICROHH_DIR / "build_gpu" / "microhh"))
 CASS_DIR = MICROHH_DIR / "cases" / "cass"
 SHARED_DIR = CASS_DIR / "shared"
-SCRATCH = Path(os.environ.get("SCRATCH", "/pscratch/sd/m/mpowell"))
+SCRATCH = Path(os.environ["SCRATCH"])
 EXP_SCRATCH = SCRATCH / "CASS_LES" / "experiments" / "rs_scale"
 
 RADS = ["2stream", "raytracer"]
@@ -123,7 +141,7 @@ def setup_rep(rs_val: float, rt: str, rep: int, dry_run: bool, debug: bool = Fal
             cfg.write(f)
         print(f"  wrote cass.ini  (rndseed={rep}, rs_scale={rs_val}, zero winds)")
 
-    symlink(MICROHH_DIR / "build_gpu" / "microhh", run_dir / "microhh", dry_run)
+    symlink(MICROHH_EXEC, run_dir / "microhh", dry_run)
 
     for name, src in SHARED_SCRIPTS:
         symlink(src, run_dir / name, dry_run)

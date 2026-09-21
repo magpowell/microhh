@@ -1,8 +1,9 @@
 # shared/data/
 
 This directory contains **symlinks only** — no actual data files live here.
-All data resides on scratch at `/pscratch/sd/m/mpowell/CASS_LES/shared_data/`
-to preserve home quota.
+All data resides on scratch at `$SCRATCH/CASS_LES/shared_data/` (Perlmutter:
+`/pscratch/sd/m/mpowell`; Empire AI Alpha: `/mnt/lustre/columbia/$USER`) to
+preserve home quota. `SCRATCH` must be set, e.g. by the machine's env script.
 
 Run `shared/setup_shared_data.sh` to (re-)create the scratch files and symlinks.
 
