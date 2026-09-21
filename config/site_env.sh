@@ -47,11 +47,11 @@ perlmutter)
     # Raytracer legs need the 80 GB HBM nodes; 2stream fits any GPU node.
     export SITE_SBATCH_2STREAM="${SITE_SBATCH_2STREAM:---constraint=gpu}"
     export SITE_SBATCH_RAYTRACER="${SITE_SBATCH_RAYTRACER:---constraint=gpu&hbm80g}"
-    # QoS names in use by the existing Perlmutter scripts: regular (whole node),
-    # shared (single-GPU, half-node charging, MaxWall 48 h per the arm97sd July
-    # scripts), debug (30 min). Single-GPU jobs go through `shared`.
-    # VERIFY on Perlmutter with `sacctmgr show qos format=Name,MaxWall` before
-    # relying on the 48 h figure or on hbm80g reachability through `shared`.
+    # Verified on Perlmutter 2026-09-21 (sacctmgr + sbatch --test-only):
+    # shared/gpu_shared MaxWall 2-00:00:00, MaxTRESPerJob gres/gpu=2,node=1;
+    # --qos=shared with --constraint=gpu&hbm80g is placed in shared_gpu_ss11 on
+    # an hbm80g node at 48 h. debug MaxWall 30 min, MaxJobsPU=2 (one experiment's
+    # 2stream+raytracer debug pair at a time). Per-GPU charging under shared.
     export SITE_QOS_PROD="${SITE_QOS_PROD:-shared}"
     export SITE_QOS_DEBUG="${SITE_QOS_DEBUG:-debug}"
     export SITE_MAXWALL_PROD="${SITE_MAXWALL_PROD:-48:00:00}"

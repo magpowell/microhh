@@ -22,8 +22,8 @@ Decision (user, 2026-09-21): do it right and rerun the suite with the corrected 
 
 ## 2. Configuration for the rerun (all experiments)
 
-- `datetime_utc = 2005-07-24 12:00:00` in `shared/config/cass_2stream.ini` and `cass_raytracer.ini`; keep
-  `endtime = 50000`. Nothing else in the time base changes (`start_day = 205.5` is then consistent).
+- DONE 2026-09-21: `datetime_utc = 2005-07-24 12:00:00` in `shared/config/cass_2stream.ini` and `cass_raytracer.ini`
+  (and `t_sfc` dropped); keep `endtime = 50000`. Every run set up from this commit on is on the corrected origin. Nothing else in the time base changes (`start_day = 205.5` is then consistent).
 - Couvreux tracer in every run (setup block as in `experiments/no_aerosols_zero_wind/setup_no_aerosols_zero_wind.py`):
   `slist += couvreux`, flux BC 1e-5, exponential decay 900 s, `nstd_couvreux = 1`, masks `couvreux,wplus,ql`,
   `couvreux` and `evisc` in the dump list. Tracer costs about 25 % wall.
@@ -181,3 +181,12 @@ READMEs no longer carry NERSC paths. Perlmutter sbatch/submit files, htar script
 Not yet validated end to end: the CASS inputs are not staged on Alpha (`shared/data/` symlinks point to
 `/pscratch`), so the Alpha smoke test used arm97sd. Next: a site-detecting env layer and one submit driver for
 both machines (Perlmutter keeps `m1266`, `gpu&hbm80g` for raytracer legs, and its verified QoS names).
+
+## 10. Site layer verified on Perlmutter (2026-09-21)
+
+`config/site_env.sh` detects Perlmutter via `NERSC_HOST`; all seven `setup_*.py` dry-run cleanly with it sourced.
+`sacctmgr`: `shared`/`gpu_shared` MaxWall 48 h (MaxTRESPerJob gres/gpu=2, node=1); `debug` 30 min, MaxJobsPU 2.
+`sbatch --test-only` with the driver's exact flags: production raytracer (`--qos=shared --constraint=gpu&hbm80g
+--gres=gpu:1 -c 32 --time=48:00:00`) and 2stream are placed in `shared_gpu_ss11`, the raytracer on an hbm80g node;
+the debug set gets a whole `gpu_ss11` node. Defaults in `site_env.sh` are therefore correct; no change needed.
+Caveat: `debug` allows 2 jobs per user, so `shared/submit.sh <expt> --debug` for one experiment at a time.
