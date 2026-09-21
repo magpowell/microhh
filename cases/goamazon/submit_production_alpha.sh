@@ -25,8 +25,9 @@
 # larger-grid variant.
 set -euo pipefail
 
-ACCOUNT=${ACCOUNT:-columbia}
-PARTITION=${PARTITION:-columbia}
+ACCOUNT=${ACCOUNT:-cu_rpincus_illuminating}
+PARTITION=${PARTITION:-alpha}
+QOS=${QOS:-standard}   # Alpha QoS tiers (2026-09-21): test 2 h, standard 48 h, long 7 d, priority 24 h
 SCRATCH=${SCRATCH:-/mnt/lustre/columbia/$USER}
 NREPS=${NREPS:-4}
 WALLTIME=${WALLTIME:-48:00:00}
@@ -45,7 +46,7 @@ if [[ -n "$GPU_TYPE" ]]; then GRES="gpu:${GPU_TYPE}:1"; else GRES="gpu:1"; fi
 echo "Setting up goamazon production (SCRATCH=$SCRATCH, NREPS=$NREPS)..."
 "$XR_PY" "$SCRIPT_DIR/setup_runs.py"
 
-BASE=(--account="$ACCOUNT" --partition="$PARTITION"
+BASE=(--account="$ACCOUNT" --partition="$PARTITION" --qos="$QOS"
       --gres="$GRES" --ntasks-per-node=1 --cpus-per-task=12)
 
 for RT in 2stream raytracer; do

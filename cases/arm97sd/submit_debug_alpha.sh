@@ -10,8 +10,9 @@
 # GrpTRESMins, so do not inflate it further without reason.
 set -euo pipefail
 
-ACCOUNT=${ACCOUNT:-columbia}
-PARTITION=${PARTITION:-columbia}
+ACCOUNT=${ACCOUNT:-cu_rpincus_illuminating}
+PARTITION=${PARTITION:-alpha}
+QOS=${QOS:-test}   # Alpha QoS tiers (2026-09-21): test 2 h, standard 48 h, long 7 d, priority 24 h
 SCRATCH=${SCRATCH:-/mnt/lustre/columbia/$USER}
 DEBUG_WALLTIME=${DEBUG_WALLTIME:-02:00:00}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,7 +27,7 @@ echo "Setting up arm97sd debug runs (SCRATCH=$SCRATCH)..."
 
 # One GPU per job: single-GPU jobs backfill, which is where the short queue
 # waits on this cluster come from. 12 CPUs/GPU (nodes are 96 cores / 8 GPUs).
-COMMON=(--account="$ACCOUNT" --partition="$PARTITION"
+COMMON=(--account="$ACCOUNT" --partition="$PARTITION" --qos="$QOS"
         --gres=gpu:1 --ntasks-per-node=1 --cpus-per-task=12
         --time="$DEBUG_WALLTIME")
 

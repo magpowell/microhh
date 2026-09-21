@@ -25,8 +25,9 @@
 #   completion:  grep -c . <dir>/goamazon.out
 set -euo pipefail
 
-ACCOUNT=${ACCOUNT:-columbia}
-PARTITION=${PARTITION:-columbia}
+ACCOUNT=${ACCOUNT:-cu_rpincus_illuminating}
+PARTITION=${PARTITION:-alpha}
+QOS=${QOS:-test}   # Alpha QoS tiers (2026-09-21): test 2 h, standard 48 h, long 7 d, priority 24 h
 SCRATCH=${SCRATCH:-/mnt/lustre/columbia/$USER}
 # H200 by default -- the whole point is measuring headroom beyond 80 GB.
 # Set GPU_TYPE=nvidia_h100_80gb_hbm3 to reproduce the Perlmutter-class limit,
@@ -54,7 +55,7 @@ for grid in $GRIDS; do
     SIM_DIR="$FIT/$grid/raytracer"
     [[ -d "$SIM_DIR" ]] || { echo "  skip $grid (no dir)"; continue; }
     jid=$(sbatch --parsable \
-        --account="$ACCOUNT" --partition="$PARTITION" \
+        --account="$ACCOUNT" --partition="$PARTITION" --qos="$QOS" \
         --gres="$GRES" --ntasks-per-node=1 --cpus-per-task=12 \
         --time="$WALLTIME" \
         --job-name="fit_${grid}" \
