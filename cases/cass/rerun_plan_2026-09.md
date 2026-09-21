@@ -137,3 +137,38 @@ state with no radiatively driven surface pattern?
 5. Launch base first so every sweep has its reference; then the sweeps, one submit each with wait-and-report
    watchers (no resubmit loops); archive to HPSS per experiment.
 6. Update `project_directive.md`, `README.md`, `analysis/README.md` from sections 1-6.
+
+## 9. Empire AI Alpha status (answers from the Alpha checkout, 2026-09-21)
+
+Target machine for the rerun. Facts as reported from Alpha on 2026-09-21:
+
+- **Storage is the blocker.** No project directory exists for `cu_rpincus_illuminating` under `/mnt/home` or
+  `/mnt/lustre`; `/mnt/lustre` is still a symlink to `/mnt/home/DDN_Copy` on the VAST NFS home filesystem, and
+  `/mnt/ddn` is empty. The new Slurm account carries no filesystem allocation. A 10-19 TB rerun needs an explicit
+  project storage request to Empire AI naming the new project; until it exists the rerun cannot be placed there.
+  Ask for the full-output figure (about 17-19 TB, section 3) plus headroom. The CASS inputs themselves are tiny
+  (`shared_data/` is 180 KB: ERA5 and CAMS composites, van Genuchten table, CASS text tables); stage them at
+  `/mnt/lustre/columbia/mpowell/shared_data` (the env script's `SCRATCH`) once storage exists.
+- **Slurm changed.** Partition and account `columbia` are gone (`columbia` now only carries a zero-priority
+  `burst` QoS). Use account `cu_rpincus_illuminating`, partition `alpha`, and an explicit `--qos`:
+  test 2 h (4-node cap), standard 48 h (30), long 7 d (15), priority 24 h (45). The Alpha submit scripts for
+  arm97sd and goamazon were updated to these defaults on `mpowell-local` (production: standard; debug and fit
+  test: test). The CASS port must inherit them.
+- **Timing (raytracer, H200 only, first 30 simulated minutes near clear sky).** Wall-to-sim ratios 1.2-1.7 for
+  goamazon 512^2 x 320-512 and 2.3-2.8 for arm97sd; scaled to 256 levels roughly 1-2x real time, so a CASS
+  raytracer sim (50000 s) is about 14-28 wall hours on H200, not materially better than the 28-h A100 figure.
+  One raytracer sim per 48-h standard job (or long). No 512^2 two-stream measurements exist on Alpha; the 64^2
+  debug runs do not scale. Raytracer memory at 512^2 x 384 peaked at 64 GB, so H100 80 GB nodes are fine.
+- **Build state intact.** Production binary `microhh-alpha-sm90-416a6706` (built 2026-07-22 from 026d9f8b on
+  `mpowell-local`, submodule 416a6706, mamba env `~/miniforge3/envs/microhh`, nvcc 12.6.85, gcc 13.4.0) in
+  `~/validated_builds/` with a README; do not overwrite it from the `rt-nonuniform-dz` branch. Rebuild from the
+  pushed `mpowell-local` for the rerun and validate the same way (section 7). The Alpha checkout currently sits
+  on `nonuniform-dz-prod` (f219ea27); its `origin` is the magpowell fork.
+- **Scheduling model there**: single-GPU jobs (8 GPUs per node, no shared-node QoS), ~30-min median queue wait in
+  July. With N concurrent single-GPU jobs the 124-140 sims of section 3 take roughly (124 x ~20 h) / N hours of
+  run time; at N = 20 that is about a week plus queue waits.
+
+Port list for the CASS scaffolding (mirror the arm97sd July port): derive `MICROHH_DIR` from the file location,
+require `SCRATCH` and `XR_PY` from `config/empireai_alpha_env.sh`, one job per (RT, rep) via `sbatch_runs_alpha.sh`-
+style scripts with chained restarts, drop the Perlmutter `-A m1266`, `hbm80g` constraint and 4-per-node packing,
+QoS as above. The cross_to_nc post-processing step must run inside the job under `XR_PY`.
