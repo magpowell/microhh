@@ -201,3 +201,13 @@ The submit plugin `rtx6000_gpu_governance` routes EVERY 1-GPU job there, ignores
 of section 3 is unchanged in GPU-hours; the arm97sd and goamazon `submit_*_alpha.sh` scripts still submit 1-GPU
 jobs and must be changed the same way before any production use. Test-QoS queue estimate at the time was about
 one day. The smoke test was resubmitted as two 2-GPU H100 jobs (old+new binary side by side per RT mode).
+
+## 10. To do (ideas queued, not yet designed)
+
+- **Amplitude scaling of the shadow anomaly (user, 2026-09-23).** Multiply the surface SW shadow anomaly by
+  0.5 and 0.25 while keeping the domain mean: F_sfc = <F> + a (F - <F>) with a = 1 (plain), 0.5, 0.25,
+  0 (= `swhomogenizesfc_sw`). Find where the 3D effect drops out. That amplitude threshold is the number to compare
+  with the static-heterogeneity experiments. Needs a new `[radiation]` switch (e.g. `sfc_sw_anomaly_scale`)
+  applied at the same point as `swhomogenizesfc_sw` in `radiation_rrtmgp_rt.cxx` (and the 2stream solver for
+  the 2s-hom analogue); no partial-scaling option exists today, only homogenize (a = 0) and `swscalesfc_to_2str`.
+  Same sweep shape as wind_geo_hom: both RT modes, 4 reps, tracer.
