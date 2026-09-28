@@ -23,7 +23,7 @@ import numpy as np
 import xarray as xr
 import sys
 sys.path.insert(0, "/global/homes/m/mpowell/repos/microhh/cases/cass/analysis")
-from cass_analysis import LST_OFFSET  # noqa: E402  (local apparent solar time)
+from cass_analysis import LST_OFFSET, cache_is_current, stamp_cache  # noqa: E402  (local apparent solar time)
 
 
 def acf_fft(X, nlags):
@@ -106,7 +106,7 @@ def main():
                 / args.expt / args.rt / f'rep_{args.rep:02d}')
     out_path = out_dir / 'T_scale.nc'
 
-    if out_path.exists() and not args.force:
+    if cache_is_current(out_path) and not args.force:
         print(f'[skip] {out_path} already exists  (--force to overwrite)')
         return
 
@@ -142,7 +142,7 @@ def main():
             ),
             't_lst_h': xr.DataArray(
                 t_lst_h, dims=['time'],
-                attrs={'units': 'h', 'long_name': 'Local standard time'},
+                attrs={'units': 'h', 'long_name': 'Local apparent solar time'},
             ),
         },
         coords={'time': t_sim_s, 'x': x_vals, 'y': y_vals},
@@ -159,7 +159,7 @@ def main():
     # float32 encoding to keep file size manageable
     enc = {v: {'dtype': 'float32', 'zlib': True, 'complevel': 4}
            for v in ['T_scale', 'T_scale_mean', 't_lst_h']}
-    ds_out.to_netcdf(out_path, encoding=enc)
+    stamp_cache(ds_out).to_netcdf(out_path, encoding=enc)
     print(f'Saved   {out_path}')
 
 

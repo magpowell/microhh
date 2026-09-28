@@ -43,6 +43,42 @@ except ImportError:
         warnings.warn("plot_microhh_utils not found; time axis will be in UTC")
         return None
 
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location(
+    "characterize_masks", Path(__file__).resolve().parent / "characterize" / "masks.py")
+_cmasks = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_cmasks)
+
+# ── Analysis-cache stamp ──────────────────────────────────────────────────────
+CACHE_STAMP = "2026-09-28"   # solar LST, periodic cloud labelling, rhoref mass flux
+
+
+def stamp_cache(ds):
+    ds.attrs["cache_stamp"] = CACHE_STAMP
+    return ds
+
+
+def write_stamp(path):
+    """Sidecar stamp for caches that are not netCDF."""
+    Path(path).with_name(Path(path).name + ".stamp").write_text(CACHE_STAMP + "\n")
+
+
+def cache_is_current(path) -> bool:
+    path = Path(path)
+    if not path.exists():
+        return False
+    if path.suffix == ".nc":
+        with xr.open_dataset(path, decode_times=False) as ds:
+            return ds.attrs.get("cache_stamp") == CACHE_STAMP
+    side = path.with_name(path.name + ".stamp")
+    return side.exists() and side.read_text().strip() == CACHE_STAMP
+
+
+def require_current_cache(path):
+    if not cache_is_current(path):
+        raise RuntimeError(f"{path}: analysis cache predates stamp {CACHE_STAMP}; recompute it")
+
+
 # ── Physical constants ────────────────────────────────────────────────────────
 Lv  = 2.5e6    # J kg⁻¹  latent heat of vaporisation
 cp  = 1005.0   # J kg⁻¹ K⁻¹
@@ -590,6 +626,11 @@ def load_3d_nc(run_dir, variables=None, chunks=None) -> xr.Dataset:
 
     ds = xr.open_mfdataset([str(p) for p in paths], decode_times=False, chunks=chunks)
 
+    stats_file = run_dir / "cass.default.0000000.nc"
+    if stats_file.exists() and "z" in ds.coords:
+        with xr.open_dataset(stats_file, group="default", decode_times=False) as g:
+            ds["rhoref"] = ("z", g["rhoref"].values)
+
     # Perturbations from instantaneous horizontal mean
     for var, prime in [("thl", "thl_prime"), ("qt", "qt_prime"), ("b", "b_prime")]:
         if var in ds:
@@ -602,7 +643,9 @@ def load_3d_nc(run_dir, variables=None, chunks=None) -> xr.Dataset:
 
     # Interpolate w (on zh) to cell-centre z for flux computations
     if "w" in ds and "z" in ds.coords:
-        ds["w_cc"]    = ds["w"].interp(zh=ds["z"])
+        z_lid = 2.0 * float(ds["z"][-1]) - float(ds["zh"][-1])   # w = 0 at the domain top
+        lid   = xr.zeros_like(ds["w"].isel(zh=[-1])).assign_coords(zh=[z_lid])
+        ds["w_cc"]    = xr.concat([ds["w"], lid], dim="zh").interp(zh=ds["z"])
         ds["w_prime"] = ds["w_cc"] - ds["w_cc"].mean(["x", "y"])
 
     # Interpolate u (on xh) and v (on yh) to cell-centre grids and compute primes
@@ -705,7 +748,7 @@ def cloud_mask_2d(qlqi_path_2d: np.ndarray) -> np.ndarray:
 
 def find_cloud_objects(mask_2d: np.ndarray, dx: float, dy: float,
                        min_L: float = 500.0) -> tuple[np.ndarray, list]:
-    """Label connected cloud-root objects in a 2D bool mask.
+    """Label connected cloud-root objects in a 2D bool mask (8-connected, doubly periodic).
 
     Parameters
     ----------
@@ -717,26 +760,28 @@ def find_cloud_objects(mask_2d: np.ndarray, dx: float, dy: float,
     -------
     labeled : (ny, nx) int array (0 = background, ≥1 = object label)
     props : list of dicts with keys:
-        label, area_m2, L (effective diameter), cy (centroid y-idx), cx (centroid x-idx)
+        label, area_m2, L (effective diameter), cy (centroid y-idx), cx (centroid x-idx);
+        centroids are circular means, so objects that wrap the boundary are handled
     """
-    labeled, n_obj = ndimage.label(mask_2d)
-    props = []
+    labeled, n_obj = _cmasks.label_periodic(mask_2d)
+    area = _cmasks.object_areas(labeled, n_obj)
+    cen  = _cmasks.periodic_centroids(labeled, n_obj, 1.0, 1.0)
+    ny, nx = labeled.shape
+    props, small = [], []
     for lbl in range(1, n_obj + 1):
-        obj = labeled == lbl
-        area_pix = obj.sum()
-        area_m2  = float(area_pix) * dx * dy
+        area_m2 = float(area[lbl - 1]) * dx * dy
         L = 2.0 * np.sqrt(area_m2 / np.pi)
         if L < min_L:
-            labeled[obj] = 0      # remove small objects
+            small.append(lbl)
             continue
-        ys, xs = np.where(obj)
         props.append(dict(
             label   = lbl,
             area_m2 = area_m2,
             L       = L,
-            cy      = int(round(ys.mean())),
-            cx      = int(round(xs.mean())),
+            cy      = int(cen[lbl - 1, 1]) % ny,
+            cx      = int(cen[lbl - 1, 0]) % nx,
         ))
+    labeled[np.isin(labeled, small)] = 0
     # Sort by size descending
     props.sort(key=lambda p: p["area_m2"], reverse=True)
     return labeled, props
@@ -1018,6 +1063,38 @@ COMPOSITE_VARS = (
 )
 
 
+def chord_run_1d(row: np.ndarray, i0: int) -> tuple[int, int]:
+    """Start index and length of the contiguous periodic run of True in *row* nearest to index i0."""
+    n = row.size
+    idx = np.flatnonzero(row)
+    if idx.size == 0:
+        return int(i0), 0
+    if idx.size == n:
+        return 0, n
+    d = np.abs(idx - i0)
+    i = int(idx[np.argmin(np.minimum(d, n - d))])
+    a = b = i
+    while row[(a - 1) % n]:
+        a -= 1
+    while row[(b + 1) % n]:
+        b += 1
+    return a % n, b - a + 1
+
+
+def centre_on_chord(fields, row: np.ndarray, i0: int):
+    """Roll slice fields along their last axis so the chord nearest i0 is centred.
+
+    Returns the rolled fields, the pixel offset of every column from the chord midpoint, and the chord length
+    in pixels.
+    """
+    start, n_run = chord_run_1d(row, i0)
+    n = row.size
+    shift = n // 2 - n_run // 2 - start
+    rolled = tuple(None if f is None else np.roll(f, shift, axis=-1) for f in fields)
+    mid = n // 2 - n_run // 2 + 0.5 * (n_run - 1)
+    return rolled, np.arange(n) - mid, n_run
+
+
 def chord_length_1d(labeled: np.ndarray, label: int,
                     cy: int, cx: int,
                     dx: float, dy: float,
@@ -1034,9 +1111,8 @@ def chord_length_1d(labeled: np.ndarray, label: int,
                   'x' → yz-slice (chord along y through column cx)
     """
     if orientation == "y":
-        return float((labeled[cy, :] == label).sum()) * dx
-    else:
-        return float((labeled[:, cx] == label).sum()) * dy
+        return float(chord_run_1d(labeled[cy, :] == label, cx)[1]) * dx
+    return float(chord_run_1d(labeled[:, cx] == label, cy)[1]) * dy
 
 
 def interp_event_to_std_grid(field_2d: np.ndarray,

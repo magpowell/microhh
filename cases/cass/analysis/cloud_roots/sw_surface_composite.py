@@ -34,7 +34,8 @@ import xarray as xr
 # ── Shared imports from parent analysis package ──────────────────────────────
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from cass_analysis import zenith_angle, CASS_LAT as LAT, CASS_DOY as DOY, LST_OFFSET, XL_GRID, dump_t_to_lst
+from cass_analysis import (zenith_angle, CASS_LAT as LAT, CASS_DOY as DOY, LST_OFFSET, XL_GRID, dump_t_to_lst,
+                           cache_is_current, require_current_cache, stamp_cache)
 
 # ── Grid / time constants ──────────────────────────────────────────────────────
 DT_XY = 60     # seconds per xy snapshot
@@ -171,7 +172,7 @@ def main():
     comp_dir = Path(args.comp_dir)
     out_path = comp_dir / 'sw_composite.nc'
 
-    if out_path.exists() and not args.force:
+    if cache_is_current(out_path) and not args.force:
         print(f'[skip] {out_path} already exists  (--force to overwrite)')
         return
 
@@ -211,6 +212,7 @@ def main():
     for _ef in ['events_xz.nc', 'events_yz.nc']:
         _ep = comp_dir / _ef
         if _ep.exists():
+            require_current_cache(_ep)
             _sample_events = xr.open_dataset(_ep, decode_times=False)
             break
 
@@ -259,6 +261,7 @@ def main():
             continue
 
         print(f'\nProcessing {orient_label} events  ({ev_path})')
+        require_current_cache(ev_path)
         ds_ev = xr.open_dataset(ev_path, decode_times=False)
 
         dump_t_arr = ds_ev['dump_t'].values     # (n_events,) float64 ns-epoch
@@ -404,7 +407,7 @@ def main():
 
     enc = {v: {'dtype': 'float32', 'zlib': True, 'complevel': 4}
            for v in data_vars if ds_out[v].dtype == np.float32}
-    ds_out.to_netcdf(out_path, encoding=enc)
+    stamp_cache(ds_out).to_netcdf(out_path, encoding=enc)
     print(f'\nSaved {out_path}')
 
 

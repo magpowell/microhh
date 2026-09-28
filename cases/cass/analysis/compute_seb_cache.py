@@ -23,7 +23,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 
-from cass_analysis import conditioned_means_ensemble  # noqa: E402
+from cass_analysis import conditioned_means_ensemble, cache_is_current, write_stamp  # noqa: E402
 from catalog import make_runset, CASS_ROOT            # noqa: E402
 
 VARS = {
@@ -46,7 +46,7 @@ def _materialise(result):
 
 
 def _is_cache_fresh(cache_file: Path, needed_vars: set) -> bool:
-    if not cache_file.exists():
+    if not cache_is_current(cache_file):
         return False
     try:
         with open(cache_file, 'rb') as fh:
@@ -81,6 +81,7 @@ def compute_one(expt: str, rt: str, n_reps: int, force: bool) -> Path:
     cache_file.parent.mkdir(parents=True, exist_ok=True)
     with open(cache_file, 'wb') as fh:
         pickle.dump(result, fh)
+    write_stamp(cache_file)
     print(f'  wrote: {cache_file}')
     return cache_file
 

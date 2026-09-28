@@ -53,7 +53,7 @@ from cass_analysis import (
     load_stats, compute_z_sl,
     load_xy_files, load_3d_nc,
     cloud_mask_2d, find_cloud_objects,
-    chord_length_1d, interp_event_to_std_grid,
+    chord_length_1d, centre_on_chord, interp_event_to_std_grid, stamp_cache,
     XL_GRID, ZND_GRID, COMPOSITE_VARS,
     _3D_VARS_CIRC,
 )
@@ -193,16 +193,11 @@ def process_rep(run_dir: Path, output_dir: Path, verbose: bool = True) -> dict:
                 if chord < MIN_CHORD_M:
                     continue
 
-                # Horizontal coordinates and centroid position in slice direction
+                # Centre the slice on the chord by a periodic roll, so wrapped clouds stay contiguous
                 fields, horiz_m, zm = _slice_fields(ds_t, cy, cx, orientation)
-
-                if orientation == "y":
-                    cloud_pix_m = horiz_m[labeled[cy, :] == lbl]
-                else:
-                    cloud_pix_m = horiz_m[labeled[:, cx] == lbl]
-
-                centroid_m = float(cloud_pix_m.mean())
-                x_nd = (horiz_m - centroid_m) / chord   # x/L, monotone increasing
+                row = (labeled[cy, :] if orientation == "y" else labeled[:, cx]) == lbl
+                fields, off, _ = centre_on_chord(fields, row, cx if orientation == "y" else cy)
+                x_nd = off * (horiz_m[1] - horiz_m[0]) / chord   # x/L, monotone increasing
 
                 # Interpolate each field onto standard grid
                 (w_thl, w_qv, w_prime, ql, thl_p, qt_p,
@@ -290,7 +285,7 @@ def _save_events(path: Path, evt_list: list[dict]):
     )
     if path.exists():
         path.unlink()
-    ds.to_netcdf(str(path))
+    stamp_cache(ds).to_netcdf(str(path))
 
 
 def main():

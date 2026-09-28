@@ -37,7 +37,7 @@ import tobac
 import tobac.merge_split  # noqa: F401  (submodule must be imported explicitly)
 import sys
 sys.path.insert(0, "/global/homes/m/mpowell/repos/microhh/cases/cass/analysis")
-from cass_analysis import solar_azimuth_deg, sim_time_to_lst  # noqa: E402
+from cass_analysis import solar_azimuth_deg, sim_time_to_lst, cache_is_current, stamp_cache  # noqa: E402
 
 
 
@@ -332,7 +332,7 @@ def main():
     out_family = out_dir / "cloud_family_lifetimes.nc"
     out_feat   = out_dir / "cloud_track_features.nc"
 
-    if out_tracks.exists() and out_ts.exists() and not args.force:
+    if cache_is_current(out_tracks) and cache_is_current(out_ts) and not args.force:
         print(f"[skip] outputs exist in {out_dir} (--force to overwrite)")
         return
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -375,7 +375,7 @@ def main():
                            v_max_m_s=args.v_max,
                            memory=args.memory,
                            dt_s=dt, dx_m=dxy)
-    ds_tracks.to_netcdf(out_tracks)
+    stamp_cache(ds_tracks).to_netcdf(out_tracks)
     print(f"Saved   {out_tracks}")
 
     ts.attrs = dict(ds_tracks.attrs)

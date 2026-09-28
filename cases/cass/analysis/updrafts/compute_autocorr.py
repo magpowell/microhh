@@ -19,7 +19,7 @@ CASS_ROOT = Path('/global/homes/m/mpowell/repos/microhh/cases/cass')
 sys.path.insert(0, str(CASS_ROOT / 'analysis'))
 sys.path.insert(0, str(CASS_ROOT / 'analysis' / 'updrafts'))
 
-from cass_analysis import load_3d_nc, load_stats
+from cass_analysis import load_3d_nc, load_stats, cache_is_current, stamp_cache
 from diagnostics  import build_couvreux_mask
 
 EXPT      = 'no_aerosols_zero_wind_v2'
@@ -69,7 +69,7 @@ def autocorr_radial(mask: xr.DataArray, n_bins: int = N_BINS) -> xr.Dataset:
 
 def per_rep(rt: str, rep_idx: int):
     cache = CACHE_DIR / f'{rt}_rep_{rep_idx:02d}.nc'
-    if cache.exists():
+    if cache_is_current(cache):
         print(f'  CACHE HIT {cache.name}', flush=True)
         return
     rd = LES_ROOT / rt / f'rep_{rep_idx:02d}'
@@ -84,7 +84,7 @@ def per_rep(rt: str, rep_idx: int):
     masks = build_couvreux_mask(ds_3d, stats=stats)
     print(f'  mask shape: {dict(masks["mask_paper"].sizes)}', flush=True)
     ds_ac = autocorr_radial(masks['mask_paper'])
-    ds_ac.to_netcdf(cache)
+    stamp_cache(ds_ac).to_netcdf(cache)
     print(f'  wrote {cache}   total {time.time()-t0:.1f}s', flush=True)
 
 

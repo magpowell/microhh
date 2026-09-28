@@ -37,7 +37,7 @@ from pathlib import Path
 
 _ANALYSIS_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(_ANALYSIS_DIR))
-from cass_analysis import COMPOSITE_VARS, XL_GRID, ZND_GRID
+from cass_analysis import COMPOSITE_VARS, XL_GRID, ZND_GRID, require_current_cache, stamp_cache
 
 
 def average_reps(composite_dir: Path, expt: str, rt: str,
@@ -61,6 +61,7 @@ def average_reps(composite_dir: Path, expt: str, rt: str,
                     print(f"  SKIP (not found): {events_path}")
                 continue
 
+            require_current_cache(events_path)
             ds = xr.open_dataset(str(events_path))
             n_ev = ds.sizes["event"]
             n_per_rep.append(n_ev)
@@ -164,6 +165,7 @@ def average_reps_windowed(composite_dir: Path, expt: str, rt: str,
                     print(f"  SKIP (not found): {events_path}")
                 continue
 
+            require_current_cache(events_path)
             ds = xr.open_dataset(str(events_path))
             dump_t_arr = ds["dump_t"].values  # (n_events,) float64 ns-epoch
 
@@ -363,7 +365,7 @@ def main():
         out_path = out_dir / f"composite_{orient}.nc"
         if out_path.exists():
             out_path.unlink()
-        ds.to_netcdf(str(out_path))
+        stamp_cache(ds).to_netcdf(str(out_path))
         n_ev = int(ds["n_events_per_rep"].values.sum())
         if verbose:
             print(f"  → composite_{orient}.nc  "

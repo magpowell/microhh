@@ -190,7 +190,6 @@ def _load_3d_if_available(rep_dir: Path):
 
 
 def check_mass_conservation(ds_3d: xr.Dataset,
-                            rho: float = 1.2,
                             tol: float = 5e-4,
                             ) -> Result:
     """[L2a] ⟨ρ·w_cc⟩(z, t) ≈ 0.  Large residual → w-interp bug or ρ(z) needed."""

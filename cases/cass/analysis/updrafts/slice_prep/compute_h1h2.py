@@ -21,7 +21,7 @@ _HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_HERE))                       # diagnostics.py
 sys.path.insert(0, str(_HERE.parent))                # cass_analysis.py
 
-from cass_analysis import load_3d_nc, load_stats     # noqa: E402
+from cass_analysis import load_3d_nc, load_stats, cache_is_current, stamp_cache     # noqa: E402
 from diagnostics import (                            # noqa: E402
     build_couvreux_mask, updraft_mass_flux,
     entrainment_rate_tracer, entrainment_rate_siebesma,
@@ -57,7 +57,7 @@ def main():
         has_all = all(v in ds_chk.variables
                       for v in ('eps', 'eps_sc', 'delta_sc', 'M_up_cloudy_up'))
         ds_chk.close()
-        if has_all:
+        if has_all and cache_is_current(cache):
             print(f'[{args.rt}/{rep}] cache OK: {cache}')
             return 0
         print(f'[{args.rt}/{rep}] cache stale — recomputing.')
@@ -71,7 +71,7 @@ def main():
     ent_R = entrainment_rate_tracer(ds_3d, masks, stats, tau=args.tau)
     ent_S = entrainment_rate_siebesma(ds_3d, masks, mf, tau=args.tau)
     out   = xr.merge([mf, ent_R, ent_S])
-    out.to_netcdf(cache)
+    stamp_cache(out).to_netcdf(cache)
     print(f'[{args.rt}/{rep}] wrote {cache}')
     return 0
 

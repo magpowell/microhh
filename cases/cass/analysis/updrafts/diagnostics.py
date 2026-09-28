@@ -32,7 +32,7 @@ if str(_ANALYSIS_DIR) not in sys.path:
     sys.path.insert(0, str(_ANALYSIS_DIR))
 
 from cass_analysis import (                                  # noqa: E402
-    compute_z_sl, cloud_top_za, load_3d_nc, load_stats, rho as RHO_REF,
+    compute_z_sl, cloud_top_za, load_3d_nc, load_stats,
 )
 
 
@@ -179,14 +179,18 @@ def build_couvreux_mask(ds_3d: xr.Dataset,
 
 def updraft_mass_flux(ds_3d: xr.Dataset,
                       masks: dict[str, xr.DataArray],
-                      rho: float = RHO_REF,
+                      rho=None,
                       ) -> xr.Dataset:
-    """Per-mask a_up, w_up, M_up.
+    """Per-mask a_up, w_up, M_up; rho defaults to the run's rhoref(z) attached by load_3d_nc.
 
     Returns a single Dataset with per-mask fields suffixed by the short mask
     name (e.g. ``a_up_paper``, ``w_up_cloudy_up``, ``M_up_clear_up``).
     """
     w = ds_3d["w_cc"] if "w_cc" in ds_3d else ds_3d["w"].interp(zh=ds_3d["z"])
+    if rho is None:
+        if "rhoref" not in ds_3d:
+            raise ValueError("no rhoref in ds_3d (stats file missing?); pass rho explicitly")
+        rho = ds_3d["rhoref"]
     out: dict[str, xr.DataArray] = {}
     for key, mask in masks.items():
         short = key.replace("mask_", "")
@@ -194,7 +198,7 @@ def updraft_mass_flux(ds_3d: xr.Dataset,
         wm = w.where(mask).mean(["x", "y"])
         out[f"a_up_{short}"]  = a.rename(f"a_up_{short}")
         out[f"w_up_{short}"]  = wm.rename(f"w_up_{short}")
-        out[f"M_up_{short}"]  = (rho * a * wm).rename(f"M_up_{short}")
+        out[f"M_up_{short}"]  = (a * wm * rho).rename(f"M_up_{short}")   # a first: keeps (time, z)
     return xr.Dataset(out)
 
 
@@ -306,7 +310,7 @@ def entrainment_rate_siebesma(ds_3d: xr.Dataset,
                               mass_flux_ds: xr.Dataset,
                               tau: float = 900.0,
                               w_min: float = 0.05,
-                              dpsi_min: float = 1e-9,
+                              dpsi_rel: float = 0.05,
                               m_floor: float = 1e-3,
                               ) -> xr.Dataset:
     """Siebesma–Cuijpers entrainment from the in-updraft / slab tracer contrast.
@@ -341,7 +345,7 @@ def entrainment_rate_siebesma(ds_3d: xr.Dataset,
     # ε_SC
     dC_u_dz  = C_u.differentiate("z")
     contrast = C_slab - C_u
-    contrast_safe = xr.where(np.abs(contrast) < dpsi_min, np.nan, contrast)
+    contrast_safe = contrast.where(np.abs(contrast) >= dpsi_rel * np.abs(contrast).max("z"))
     eps_sc = (dC_u_dz + C_u / (tau * w_u_safe)) / contrast_safe
 
     # δ_SC from mass continuity, gated on M to avoid blowup outside cloud layer
