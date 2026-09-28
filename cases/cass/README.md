@@ -87,12 +87,15 @@ bash cases/cass/shared/submit.sh wind_geo -- --values 2.5 10.0
 | | Perlmutter | Empire AI Alpha |
 |---|---|---|
 | account / partition | `m1266` | `cu_rpincus_illuminating`, `alpha` |
-| raytracer legs | `--constraint=gpu&hbm80g` | any node (H100 80 GB fits); `GPU_TYPE=nvidia_h200` to force H200 |
+| sims per job | 1 (`shared` QoS charges per GPU) | 2, typed `--gres=gpu:nvidia_h100_80gb_hbm3:2` |
+| raytracer legs | `--constraint=gpu&hbm80g` | H100 (fits, 64 GB peak); `SITE_GPU_TYPE=nvidia_h200` for H200 |
 | QoS prod / debug | `shared` / `debug` | `standard` / `test` |
 | debug wall time | 30 min | 2 h |
 
-Override any of `QOS`, `WALLTIME`, `TS_WALLTIME`, `DEBUG_WALLTIME`, `GPU_TYPE`, or the `SITE_*` variables in the
-environment. Job bodies: `shared/sbatch_run.sh` and `shared/sbatch_restart.sh` (both post-process the xy crosses
+Alpha packs two sims per job because its `rtx6000_gpu_governance` submit plugin routes every 1-GPU job to
+the RTX PRO 6000 Blackwell nodes (alphagpu51-54), whose weak FP64 makes the raytracer about 20x slower; only a
+typed request for two or more GPUs reaches H100/H200. Override any of `QOS`, `WALLTIME`, `TS_WALLTIME`,
+`DEBUG_WALLTIME`, or the `SITE_*` variables in the environment. Job bodies: `shared/sbatch_run.sh` and `shared/sbatch_restart.sh` (both post-process the xy crosses
 under `$XR_PY` inside the job). Run dirs and logs follow the `$SCRATCH/CASS_LES/` layout below. The `setup_*.py`
 scripts locate the repo from their own path and require `SCRATCH`, on every machine. The per-experiment
 `submit_*.sh` / `sbatch_*.sh` files above are the older Perlmutter node-packed path and still work there.

@@ -12,16 +12,16 @@
 #                 wiring before spending real time.
 #   -- ...        passed through to setup_<experiment>.py (e.g. -- --values 2 4)
 #
-# One single-GPU job per (value, RT mode, rep), on both sites:
-#   Alpha has 8 GPUs/node and no shared-node QoS, so a whole-node request idles
-#   GPUs as soon as the fastest run finishes; Perlmutter's `shared` QoS charges
-#   per GPU. Single-GPU jobs backfill well on both.
-# Raytracer reps get a chained restart job (afterany) because a CASS raytracer
+# One GPU per sim, SITE_GPUS_PER_JOB sims per job, grouped within an RT mode so
+# a job's sims share a wall time:
+#   Perlmutter: 1 sim per job under the per-GPU-charged `shared` QoS.
+#   Alpha: 2 sims per job with a typed gres, because the GPU governance plugin
+#   sends every 1-GPU job to the RTX 6000 (Blackwell, weak FP64) pool.
+# Raytracer jobs get a chained restart job (afterany) because a CASS raytracer
 # sim is up to about 28 wall hours and the production QoS caps at 48 h.
 #
-# Overrides (export before running): SITE, ACCOUNT/PARTITION via
-# SITE_SBATCH_COMMON, QOS, WALLTIME (raytracer), TS_WALLTIME (2stream),
-# DEBUG_WALLTIME, GPU_TYPE (Alpha: nvidia_h200), MICROHH_EXEC.
+# Overrides (export before running): SITE, the SITE_* variables, QOS,
+# WALLTIME (raytracer), TS_WALLTIME (2stream), DEBUG_WALLTIME, MICROHH_EXEC.
 set -euo pipefail
 
 usage() { sed -n '2,24p' "${BASH_SOURCE[0]}"; exit 1; }
@@ -45,8 +45,9 @@ source "$CASS_DIR/../../config/site_env.sh"
 WALLTIME=${WALLTIME:-$SITE_MAXWALL_PROD}
 TS_WALLTIME=${TS_WALLTIME:-16:00:00}
 DEBUG_WALLTIME=${DEBUG_WALLTIME:-$SITE_DEBUG_WALLTIME}
-GPU_TYPE=${GPU_TYPE:-}
 if [[ $DEBUG == 1 ]]; then QOS=${QOS:-$SITE_QOS_DEBUG}; else QOS=${QOS:-$SITE_QOS_PROD}; fi
+NGPU=$SITE_GPUS_PER_JOB
+GRES="gpu:${SITE_GPU_TYPE:+$SITE_GPU_TYPE:}$NGPU"
 
 # Setup script and run root for this experiment.
 if [[ "$EXPT" == "base" ]]; then
@@ -70,27 +71,30 @@ mkdir -p "$LOGS"
 echo "Setting up CASS $EXPT on $SITE (SCRATCH=$SCRATCH, debug=$DEBUG) ..."
 "$XR_PY" "$SETUP" "${SETUP_ARGS[@]}"
 
-if [[ -n "$GPU_TYPE" ]]; then GRES="gpu:${GPU_TYPE}:1"; else GRES="gpu:1"; fi
 read -ra COMMON <<< "$SITE_SBATCH_COMMON"
 read -ra EXTRA_2S <<< "$SITE_SBATCH_2STREAM"
 read -ra EXTRA_RT <<< "$SITE_SBATCH_RAYTRACER"
 BASE=("${COMMON[@]}" --qos="$QOS" --gres="$GRES" --nodes=1
-      --ntasks-per-node=1 --cpus-per-task="$SITE_CPUS_PER_GPU")
+      --ntasks-per-node="$NGPU" --cpus-per-task="$SITE_CPUS_PER_GPU")
 
 # Run dirs: <root>/[<value>/]<rt>/rep_NN. The sweep experiments (rs_scale,
 # wind_geo) have the extra <value> level; the others do not. Enumerating the
 # directories the setup script created keeps this file free of per-experiment
 # layout knowledge.
-mapfile -t RUN_DIRS < <(find "$RUN_ROOT" -mindepth 2 -maxdepth 3 -type d -name 'rep_[0-9][0-9]' \
-                        \( -path '*/2stream/*' -o -path '*/raytracer/*' \) | sort)
-[[ ${#RUN_DIRS[@]} -gt 0 ]] || { echo "no run dirs under $RUN_ROOT" >&2; exit 1; }
+find_runs() {  # $1 = rt
+    find "$RUN_ROOT" -mindepth 2 -maxdepth 3 -type d -name 'rep_[0-9][0-9]' -path "*/$1/*" | sort
+}
 
-echo "Submitting ${#RUN_DIRS[@]} single-GPU job(s) (qos=$QOS) ..."
-for SIM_DIR in "${RUN_DIRS[@]}"; do
-    RT="$(basename "$(dirname "$SIM_DIR")")"                # 2stream | raytracer
-    REP="${SIM_DIR##*/rep_}"
-    VAL_DIR="$(dirname "$(dirname "$SIM_DIR")")"
-    if [[ "$VAL_DIR" == "$RUN_ROOT" ]]; then TAG="$EXPT"; else TAG="${EXPT}_$(basename "$VAL_DIR")"; fi
+# Short tag for job names and log files: <expt>[_<value>]-<rt>-rep<NN>[+<M>]
+tag_of() {  # $1 = sim dir
+    local val_dir; val_dir="$(dirname "$(dirname "$1")")"
+    if [[ "$val_dir" == "$RUN_ROOT" ]]; then echo "$EXPT"; else echo "${EXPT}_$(basename "$val_dir")"; fi
+}
+
+NJOBS=0
+for RT in 2stream raytracer; do
+    mapfile -t DIRS < <(find_runs "$RT")
+    [[ ${#DIRS[@]} -gt 0 ]] || continue
     if [[ "$RT" == "raytracer" ]]; then
         EXTRA=("${EXTRA_RT[@]}"); RTS=rt
         if [[ $DEBUG == 1 ]]; then W="$DEBUG_WALLTIME"; else W="$WALLTIME"; fi
@@ -99,28 +103,45 @@ for SIM_DIR in "${RUN_DIRS[@]}"; do
         if [[ $DEBUG == 1 ]]; then W="$DEBUG_WALLTIME"; else W="$TS_WALLTIME"; fi
     fi
 
-    jid=$(sbatch --parsable "${BASE[@]}" "${EXTRA[@]}" --time="$W" \
-        --job-name="cass_${TAG}_${RTS}_${REP}" \
-        --output="$LOGS/${TAG}-${RT}-rep${REP}-%j.out" \
-        --error="$LOGS/${TAG}-${RT}-rep${REP}-%j.err" \
-        --export=ALL,MICROHH_DIR="$MICROHH_DIR",SITE="$SITE",SIM_DIRS="$SIM_DIR" \
-        "$SCRIPT_DIR/sbatch_run.sh")
-    echo "  $TAG $RT rep_$REP: job $jid (walltime $W)"
+    # Pack NGPU consecutive sims (same RT, sorted so a value's reps stay
+    # together) into one job. A leftover group of fewer sims still requests
+    # NGPU GPUs, which is what the Alpha governance rule needs.
+    for ((i = 0; i < ${#DIRS[@]}; i += NGPU)); do
+        GROUP=("${DIRS[@]:i:NGPU}")
+        SIM_DIRS=$(IFS=':'; echo "${GROUP[*]}")
+        FIRST="${GROUP[0]}"
+        TAG="$(tag_of "$FIRST")"
+        REP="${FIRST##*/rep_}"
+        SUFFIX=""; [[ ${#GROUP[@]} -gt 1 ]] && SUFFIX="+$(( ${#GROUP[@]} - 1 ))"
+        NAME="${TAG}-${RT}-rep${REP}${SUFFIX}"
 
-    # Chain a restart for production raytracer reps. afterany: the chain must
-    # also run when the parent hits the wall, which is the case it exists for.
-    if [[ $DEBUG == 0 && "$RT" == "raytracer" ]]; then
-        rid=$(sbatch --parsable "${BASE[@]}" "${EXTRA[@]}" --time="$WALLTIME" \
-            --job-name="cass_${TAG}_rst_${REP}" \
-            --dependency=afterany:"$jid" \
-            --output="$LOGS/${TAG}-restart-rep${REP}-%j.out" \
-            --error="$LOGS/${TAG}-restart-rep${REP}-%j.err" \
-            --export=ALL,MICROHH_DIR="$MICROHH_DIR",SITE="$SITE",SIM_DIRS="$SIM_DIR" \
-            "$SCRIPT_DIR/sbatch_restart.sh")
-        echo "    chained restart: job $rid (afterany:$jid)"
-    fi
+        jid=$(sbatch --parsable "${BASE[@]}" "${EXTRA[@]}" --time="$W" \
+            --job-name="cass_${TAG}_${RTS}_${REP}${SUFFIX}" \
+            --output="$LOGS/${NAME}-%j.out" \
+            --error="$LOGS/${NAME}-%j.err" \
+            --export=ALL,MICROHH_DIR="$MICROHH_DIR",SITE="$SITE",SIM_DIRS="$SIM_DIRS" \
+            "$SCRIPT_DIR/sbatch_run.sh")
+        echo "  $NAME (${#GROUP[@]} sim(s), $GRES): job $jid, walltime $W"
+        NJOBS=$((NJOBS + 1))
+
+        # Chain a restart for production raytracer jobs. afterany: the chain
+        # must also run when the parent hits the wall, which is the case it
+        # exists for. The restart body skips sims that already completed.
+        if [[ $DEBUG == 0 && "$RT" == "raytracer" ]]; then
+            rid=$(sbatch --parsable "${BASE[@]}" "${EXTRA[@]}" --time="$WALLTIME" \
+                --job-name="cass_${TAG}_rst_${REP}${SUFFIX}" \
+                --dependency=afterany:"$jid" \
+                --output="$LOGS/${TAG}-restart-rep${REP}${SUFFIX}-%j.out" \
+                --error="$LOGS/${TAG}-restart-rep${REP}${SUFFIX}-%j.err" \
+                --export=ALL,MICROHH_DIR="$MICROHH_DIR",SITE="$SITE",SIM_DIRS="$SIM_DIRS" \
+                "$SCRIPT_DIR/sbatch_restart.sh")
+            echo "    chained restart: job $rid (afterany:$jid)"
+        fi
+    done
 done
+[[ $NJOBS -gt 0 ]] || { echo "no run dirs under $RUN_ROOT" >&2; exit 1; }
 
 echo
+echo "Submitted $NJOBS job(s) on $SITE (qos=$QOS, $NGPU sim(s) per job)."
 echo "Watch with:  squeue -u $USER"
 echo "Logs in:     $LOGS"
