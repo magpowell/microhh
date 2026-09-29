@@ -322,3 +322,97 @@ For the affected runs the wind speeds are lower than labelled and the direction 
 about wind direction relative to the sun cannot be used from them. Fix for v3 runs 3 and 4 and for the wind
 experiment: write the geostrophic wind equal to the nudging target (time-dependent for the CASS winds, which needs
 `swtimedep_geo=true`), so that the Coriolis term vanishes at the target.
+
+## 14. Surface fluxes: two densities in the land-surface coupling (found and fixed 2026-09-29)
+
+### The error
+
+With `[thermo] swupdatebasestate=1` (the MicroHH default, used in every CASS run) the model holds two densities:
+the density of the dynamics, frozen at the initial profile (1.1483 kg/m3 at the surface), and the density of the
+thermodynamic base state, updated every step from the mean state. At the surface the second one follows the mean
+skin values and falls to 1.06 to 1.08 kg/m3 at midday.
+
+The land-surface model used the second density, in the bulk formulas of the surface energy balance and in the
+conversion of H and LE to the kinematic fluxes the atmosphere receives. The atmosphere applies the kinematic fluxes
+with the first density. The atmosphere therefore received more energy and more water than the surface energy
+balance handed over. Upstream MicroHH has the same code. Radiation, microphysics, advection, diffusion and the
+pressure solver use the first density.
+
+| Energy the atmosphere received over energy the land model reported | 16 UTC | 18 UTC | 20 UTC | 22 UTC |
+|---|---|---|---|---|
+| v3 small test, old code | 1.073 | 1.078 | 1.078 | 1.068 |
+| v2 full size, old code (start 10:30 UTC, so 14:30, 16:30, 18:30, 20:30 UTC) | 1.051 | 1.070 | 1.073 | 1.071 |
+
+Over the day of the v3 small test: 1.05 MJ/m2 of energy (7.1 %) and 0.32 kg/m2 of water (7.0 %) too much.
+
+### The fix
+
+Commit c40a8615c: the land-surface model takes the density of the dynamics (`fields.rhorefh`, on the GPU
+`fields.rhorefh_g`) wherever it used the thermodynamic one (`src/boundary_surface_lsm.cxx`, `.cu`; three lines).
+The kinematic flux stays (skin minus air) over the resistance, as the surface-layer similarity assumes, and the
+energy flux is that times the density of the dynamics times cp or Lv. An independent audit of the diagnosis and of
+the fix (code and data) confirmed both and found nothing that blocks production.
+
+### Tests (64 x 64, two-stream, same ini and input as the earlier tests)
+
+| Test | Result |
+|---|---|
+| Received flux equals the reported flux | largest deviation of the ratio from 1: 7e-15 (old code: 0.080) |
+| Surface energy balance closes | residual, net radiation minus H, LE, G and storage: mean 0.10, largest 2.0 W/m2, the same on the land side and on the atmosphere side (old code, atmosphere side: mean -24, largest 42 W/m2) |
+| Prescribed-flux path unchanged | bit-identical: 0 of 1069 statistics variables differ over the whole run, 3D fields identical |
+| Run with CASS winds (run 3 settings) | received equals reported, 9e-15 |
+| Run 4 settings | the atmosphere receives the CASS table fluxes, largest difference 4e-11 W/m2 |
+
+Size of the change in the small test (new code against old code, same seed):
+
+| | 15 UTC | 18 UTC | 20 UTC | day |
+|---|---|---|---|---|
+| Energy delivered to the atmosphere | -4.3 % | -5.7 % | -6.1 % | -5.1 % |
+| Bowen ratio, new (old) | 0.400 (0.401) | 0.344 (0.349) | 0.315 (0.312) | 0.311 (0.312) |
+| Cloud base, new (old) | | 1312 (1337) m | 1487 (1537) m | |
+
+- The change in delivered energy is less than the 7 to 8 % of the error, because the surface energy balance
+  repartitions: the skin is 0.6 to 0.8 K cooler, the ground heat flux 4 % smaller, H + LE reported by the land
+  model 1.6 % larger.
+- First cloud 16:35 UTC (old 16:30), one statistics sample later.
+- Cloud cover, liquid water path and cloud top are not interpreted from one pair of small runs; a second seed
+  with both binaries (job 59086324) gives the spread between realizations.
+
+### What it means
+
+- v2 and every earlier land-surface run carry the error. It is the same in 1D and 3D, so differences between the
+  two are affected only to second order, but absolute budgets are not closed: the atmosphere received 5 to 8 % more
+  energy and water in daytime than the surface gave.
+- To get what the atmosphere received in an old run, convert the kinematic surface fluxes of the statistics with
+  the density of the dynamics (`rhorefh` in group `default`), not with `rhoh` of group `thermo`.
+- `cass_input.py` converted the prescribed CASS fluxes with a third density (1.139) and Lv 2.5e6: the atmosphere
+  received 0.8 % more than the table. With `--flux-model-density` (used for run 4) it receives the table values.
+- Not changed, and small: the surface flux has no Exner factor while radiation has one (0.9 % of H); the land
+  model linearises its own longwave emission (residual below 2 W/m2).
+
+## 15. Runs 3 and 4: winds (2026-09-29)
+
+- `cass_input.py --cass-winds`: CASS composite winds, nudged on 1 h at all heights with their own factor
+  (`nudgefac_u`, `nudgefac_v`), geostrophic wind equal to the nudging target (time dependent, `swtimedep_geo=true`).
+  The model change that allows a nudging factor per variable is commit 5a2770606 (`src/force.cxx`, `.cu`); without
+  `nudgefac_<variable>` in the input the old behaviour is kept.
+- Configurations in `setup_no_aerosols_zero_wind.py`: `2stream_wind` (run 3) and `2stream_cass` (run 4); both with
+  hourly 3D output only. `2stream_prescribed` (zero winds) stays as the test of the prescribed-flux path.
+- Small tests: the wind nudging tendency equals minus (wind minus target) over 3600 s to 3e-17; thl and qt nudging
+  is zero below 4.5 km. The wind stays within about 1 m/s of the target; more where the CASS target itself changes
+  by several m/s per hour.
+- With the CASS winds the interactive land surface gives a Bowen ratio of 0.60 at 15 UTC and 0.46 at 18 UTC, against
+  0.40 and 0.34 without wind (ERA5 0.60 and 0.49, CASS table 0.72 and 0.67).
+
+## 16. Cost of the statistics (2026-09-29)
+
+From `cass.out` of the v2 production runs, wall time per 20 iterations against the number of radiation, statistics
+and dump times in the interval:
+
+| v2, member 1 | Iterations | Radiation and 60 s output | Statistics | Total |
+|---|---|---|---|---|
+| Two-stream | 3.6 h | 2.0 h | 6.1 h | 11.7 h |
+| Ray tracer | 6.0 h | 13.3 h | 6.7 h | 26.0 h |
+
+One statistics sample cost 133 s in v2 and costs 160 s in the v3 full-size test (320 levels, four masks, tendencies).
+The statistics are computed on the host. Sampling every 300 s costs 7.4 h per v3 run.
