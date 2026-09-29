@@ -454,7 +454,10 @@ void Force<TF>::init()
     {
         nudge_factor.resize(gd.kcells);
         for (auto& it : nudgelist)
+        {
             nudgeprofs[it] = std::vector<TF>(gd.kcells);
+            nudge_factors[it] = std::vector<TF>(gd.kcells);
+        }
 
     }
 }
@@ -543,6 +546,29 @@ void Force<TF>::create(Input& inputin, Netcdf_handle& input_nc, Stats<TF>& stats
                 std::string msg = "field " + it + " in [force][nudgelist] is illegal";
                 throw std::runtime_error(msg);
             }
+
+        // Use the variable specific factor "nudgefac_X" if it is in the input, otherwise "nudgefac"
+        for (auto& it : nudgelist)
+        {
+            const std::string nudgefac_name = "nudgefac_" + it;
+            if (group_nc.variable_exists(nudgefac_name))
+            {
+                group_nc.get_variable(nudge_factors[it], nudgefac_name, {0}, {gd.ktot});
+                TF max_it = *std::max_element(nudge_factors[it].begin(), nudge_factors[it].end());
+                if (max_it < minnudge)
+                {
+                    std::string msg = "The maximum value of " + nudgefac_name + " is smaller than the minimum allowed value of " + std::to_string(minnudge);
+                    throw std::runtime_error(msg);
+                }
+                std::rotate(nudge_factors[it].rbegin(), nudge_factors[it].rbegin() + gd.kstart, nudge_factors[it].rend());
+                master.print_message("Nudging of \"%s\" uses the factor profile \"%s\"\n", it.c_str(), nudgefac_name.c_str());
+            }
+            else
+            {
+                nudge_factors[it] = nudge_factor;
+                master.print_message("Nudging of \"%s\" uses the factor profile \"nudgefac\"\n", it.c_str());
+            }
+        }
 
         // Read the nudging profiles, which are the variable names with a "nudge" suffix
         for (auto& it : nudgelist)
@@ -747,7 +773,7 @@ void Force<TF>::exec(double dt, Thermo<TF>& thermo, Stats<TF>& stats)
 
             calc_nudging_tendency<TF>(
                     fields.at.at(it)->fld.data(), fields.ap.at(it)->fld_mean.data(),
-                    nudgeprofs.at(it).data(), nudge_factor.data(),
+                    nudgeprofs.at(it).data(), nudge_factors.at(it).data(),
                     gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
                     gd.icells, gd.ijcells);
 

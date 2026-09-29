@@ -190,10 +190,10 @@ void Force<TF>::prepare_device()
         {
             nudgeprofs_g.emplace(it, cuda_vector<TF>(gd.kcells));
             cuda_safe_call(cudaMemcpy(nudgeprofs_g.at(it), nudgeprofs.at(it).data(), nmemsize, cudaMemcpyHostToDevice));
+            nudge_factors_g.emplace(it, cuda_vector<TF>(gd.kcells));
+            cuda_safe_call(cudaMemcpy(nudge_factors_g.at(it), nudge_factors.at(it).data(), nmemsize, cudaMemcpyHostToDevice));
         }
-        nudge_factor_g.allocate(gd.kcells);
         nudge_tend_g.allocate(gd.kcells);
-        cuda_safe_call(cudaMemcpy(nudge_factor_g, nudge_factor.data(), nmemsize, cudaMemcpyHostToDevice));
     }
 
     if (swwls == Large_scale_subsidence_type::Mean_field ||
@@ -363,7 +363,7 @@ void Force<TF>::exec(double dt, Thermo<TF>& thermo, Stats<TF>& stats)
                     nudge_tend_g.view(),
                     fields.ap.at(it)->fld_mean_g,
                     nudgeprofs_g.at(it),
-                    nudge_factor_g,
+                    nudge_factors_g.at(it),
                     gd.kstart, gd.kend);
 
             // Add tendency profile to 3D tendency field.
