@@ -132,7 +132,8 @@ void Boundary_surface_lsm<TF>::exec(
     const TF db_ref = thermo.get_db_ref();
 
     // Get basestate vectors.
-    TF* rhorefh = thermo.get_basestate_fld_g("rhoh");
+    // Density of the dynamics, so that the fluxes given to the atmosphere conserve energy.
+    TF* rhorefh = fields.rhorefh_g;
     TF* thvrefh = thermo.get_basestate_fld_g("thvh");
     TF* exnrefh = thermo.get_basestate_fld_g("exnerh");
     TF* prefh   = thermo.get_basestate_fld_g("prefh");
@@ -360,7 +361,7 @@ void Boundary_surface_lsm<TF>::exec(
     }
 
     // Calculate tile averaged surface fluxes and values.
-    const TF rhoref_bot = thermo.get_basestate_vector("rhoh")[gd.kstart];
+    const TF rhoref_bot = fields.rhorefh[gd.kstart];
     const TF rhocpi = TF(1) / (rhoref_bot * Constants::cp<TF>);
     const TF rholvi = TF(1) / (rhoref_bot * Constants::Lv<TF>);
     const TF no_scaling = TF(1);

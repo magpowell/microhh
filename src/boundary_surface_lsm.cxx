@@ -386,7 +386,8 @@ void Boundary_surface_lsm<TF>::exec(
     thermo.get_buoyancy_surf(buoy->fld, *b_bot, false);
     const TF db_ref = thermo.get_db_ref();
 
-    const std::vector<TF>& rhorefh = thermo.get_basestate_vector("rhoh");
+    // Density of the dynamics, so that the fluxes given to the atmosphere conserve energy.
+    const std::vector<TF>& rhorefh = fields.rhorefh;
     const std::vector<TF>& thvrefh = thermo.get_basestate_vector("thvh");
     const std::vector<TF>& exnrefh = thermo.get_basestate_vector("exnerh");
     const std::vector<TF>& prefh = thermo.get_basestate_vector("ph");
