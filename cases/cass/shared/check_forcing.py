@@ -132,7 +132,7 @@ def applied(run, lsf):
             if f"{v}_nudge" in I["timedep"].variables:
                 exp["nudge"] = -nf[None, :] * (mean - at(f"{v}_nudge"))
             for proc in ("ls", "subs", "nudge", "damp", "rad", "micro"):
-                name = f"{v}_{proc}"
+                name = f"{v}t_{proc}"
                 if name not in T.variables:
                     continue
                 m = np.ma.filled(T[name][:], np.nan)
