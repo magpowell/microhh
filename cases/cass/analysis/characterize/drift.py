@@ -8,11 +8,12 @@ centroid without moving itself; the drift includes that.
 The root of a cloud is marked in a disk around the cloud centroid (WINDOW times the equivalent radius) by the
 centroid of one of
   flux   the surface flux deficit, mean of H + LE minus H + LE where that is positive (the shaded surface),
-  conv   rising air at ZCONV, from the one-minute 3D files (w at the surface, as in the xy cross-sections, is zero).
+  conv   the horizontal convergence of the wind at ZCONV, where positive, from the one-minute cross-sections of
+         u and v (runs with xy = 0,100) or, without them, from the one-minute 3D files.
 The drift of the whole pattern comes from the cross-correlation of consecutive fields; the largest clouds dominate
 it, so it is reported on its own. With wind=True the mean wind of the cloud layer is subtracted from every drift.
 
-python drift.py --run <run dir> [--tmin 23700 --tmax 38400] [--wind] [--conv]
+python drift.py --run <run dir> [--tmin 23700 --tmax 38400] [--wind] [--conv cross|hf]
 """
 import argparse
 from pathlib import Path
@@ -28,7 +29,7 @@ from les_io import Run
 CP, LV = 1005., 2.501e6
 DMIN = 500.          # smallest equivalent diameter [m]
 WINDOW = 1.5         # radius of the root window in equivalent radii
-ZCONV = 100.         # height of the rising-air marker [m]
+ZCONV = 100.         # height of the convergence marker [m]
 MIN_STEPS = 5
 FRAC_MIN = 1.e-3     # cloud layer: levels with cloud fraction above this
 
@@ -158,18 +159,39 @@ def flux_deficit(run):
     return np.maximum(f.mean(axis=(1, 2), keepdims=True) - f, 0.), time
 
 
-def rising_air(run, time, z=ZCONV):
-    """Marker function of rising air at the half level nearest z, from the one-minute 3D files."""
-    k = int(np.argmin(np.abs(run.zh[:-1] - z)))
+def convergence(u, v, dx, dy):
+    """Horizontal convergence at the cell centres from u on the west faces and v on the south faces (y, x)."""
+    return -((np.roll(u, -1, axis=-1) - u) / dx + (np.roll(v, -1, axis=-2) - v) / dy)
+
+
+def level_of(z, levels):
+    return int(np.argmin(np.abs(np.asarray(levels) - z)))
+
+
+def convergence_cross(run, z=ZCONV):
+    """Marker of converging air at every frame from the cross-sections of u and v at the level nearest z."""
+    out = []
+    for var in ("u", "v"):
+        with xr.open_dataset(run.dir / f"{var}.xy.nc", decode_times=False) as d:
+            a = d[var]
+            lev = [n for n in a.dims if n.startswith("z")][0]
+            out.append(a.isel({lev: level_of(z, d[lev].values)}).values.astype(float))
+    return np.maximum(convergence(out[0], out[1], run.dx, run.dy), 0.)
+
+
+def convergence_hf(run, time, z=ZCONV):
+    """Marker function of converging air at the full level nearest z, from the one-minute 3D files."""
+    k = level_of(z, run.z)
     n = run.jtot * run.itot
 
     def marker(f):
-        w = np.fromfile(run.dir / f"w_hf.{int(round(time[f])):07d}", dtype="<f4", count=n, offset=4 * n * k)
-        return np.maximum(w.reshape(run.jtot, run.itot).astype(float), 0.)
+        u, v = (np.fromfile(run.dir / f"{var}_hf.{int(round(time[f])):07d}", dtype="<f4", count=n, offset=4 * n * k)
+                .reshape(run.jtot, run.itot).astype(float) for var in ("u", "v"))
+        return np.maximum(convergence(u, v, run.dx, run.dy), 0.)
     return marker
 
 
-def analyse(run_dir, tmin=None, tmax=None, thr=0., wind=False, conv=False, dmin=DMIN):
+def analyse(run_dir, tmin=None, tmax=None, thr=0., wind=False, conv=None, dmin=DMIN):
     """Steps of clouds with their drift, per-track means, and the drift of the pattern."""
     run = Run(run_dir)
     path, time, x, y = tr.load(run.dir, "qlqi_path")
@@ -181,7 +203,12 @@ def analyse(run_dir, tmin=None, tmax=None, thr=0., wind=False, conv=False, dmin=
     st = steps(feats, run.xsize, run.ysize, dmin)
     pairs = [("u", "v", "")]
     deficit = flux_deficit(run)[0]
-    markers = [("flux", lambda f: deficit[k0 + f])] + ([("conv", rising_air(run, time))] if conv else [])
+    markers = [("flux", lambda f: deficit[k0 + f])]
+    if conv == "cross":
+        c = convergence_cross(run)
+        markers.append(("conv", lambda f: c[k0 + f]))
+    elif conv == "hf":
+        markers.append(("conv", convergence_hf(run, time)))
     for name, marker in markers:
         r = root_steps(st, marker, run.dx, run.dy, run.xsize, run.ysize)
         st = st.assign(**{f"rx_{name}": r["rx"], f"ry_{name}": r["ry"], f"u_{name}": r["ur"], f"v_{name}": r["vr"]})
@@ -214,7 +241,7 @@ def report(run_dir, tmin, tmax, wind, conv):
     rows = [("cloud drift", t, "", "m s-1"), ("root drift, flux deficit", t, "_flux", "m s-1"),
             ("root offset, flux deficit", t, "_off_flux", "m")]
     if conv:
-        rows += [("root drift, rising air", t, "_conv", "m s-1"), ("root offset, rising air", t, "_off_conv", "m")]
+        rows += [("root drift, convergence", t, "_conv", "m s-1"), ("root offset, convergence", t, "_off_conv", "m")]
     rows += [("pattern drift", pat, "", "m s-1")]
     for name, d, s, unit in rows:
         out, n = [], 0
@@ -230,6 +257,7 @@ if __name__ == "__main__":
     ap.add_argument("--tmin", type=float, default=None)
     ap.add_argument("--tmax", type=float, default=None)
     ap.add_argument("--wind", action="store_true", help="subtract the mean wind of the cloud layer")
-    ap.add_argument("--conv", action="store_true", help="root from rising air in the one-minute 3D files")
+    ap.add_argument("--conv", choices=["cross", "hf"], default=None,
+                    help="root from the convergence at 100 m: cross-sections of u and v, or the one-minute 3D files")
     a = ap.parse_args()
     report(a.run, a.tmin, a.tmax, a.wind, a.conv)

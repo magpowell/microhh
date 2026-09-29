@@ -115,6 +115,39 @@ def test_root_without_a_marker_is_missing():
     assert r[["rx", "ry", "ur", "vr"]].isna().all().all()
 
 
+def test_convergence_of_a_known_wind():
+    """u = A sin(kx x) on the west faces, v = B cos(ky y) on the south faces: the grid divergence is known exactly."""
+    kx, ky, A, B = 2. * np.pi * 3 / (N * DX), 2. * np.pi * 2 / (N * DX), 1.5, -0.7
+    xh, yh = np.arange(N) * DX, np.arange(N) * DX
+    x, y = xh + 0.5 * DX, yh + 0.5 * DX
+    u = A * np.sin(kx * xh)[None, :] * np.ones((N, 1))
+    v = B * np.cos(ky * yh)[:, None] * np.ones((1, N))
+    exact = -(A * 2. / DX * np.sin(0.5 * kx * DX) * np.cos(kx * x)[None, :]
+              - B * 2. / DX * np.sin(0.5 * ky * DX) * np.sin(ky * y)[:, None])
+    c = dr.convergence(u, v, DX, DX)
+    assert np.abs(c - exact).max() < 2.e-15                      # measured 1.1e-16, values about 1e-2
+    assert abs(c.mean()) < 1.e-17                                # a periodic wind has no mean convergence
+    assert dr.level_of(100., [12.5, 112.5]) == 1 and dr.level_of(0., [12.5, 112.5]) == 0
+
+
+def test_root_from_convergence_follows_the_inflow(monkeypatch):
+    _fixed_sun(monkeypatch)
+    nt, s = 6, 12
+    path = _boxes(nt, [(0, nt - 1, 30, 20, s, 0, 1)])            # cloud moves 1 cell per frame in x
+    xh = yh = np.arange(N) * DX
+    fields = []
+    for f in range(nt):                                          # inflow centred 2 cells east of the cloud centroid
+        xc, yc = (20 + 0.5 * s + f + 2.) * DX, (30 + 0.5 * s) * DX
+        g = lambda a, c: np.exp(-0.5 * dr.wrap(a - c, N * DX)**2 / (2. * DX)**2)
+        u = -dr.wrap(xh[None, :] - xc, N * DX) * g(xh[None, :], xc) * g(yh[:, None] + 0.5 * DX, yc)
+        v = -dr.wrap(yh[:, None] - yc, N * DX) * g(xh[None, :] + 0.5 * DX, xc) * g(yh[:, None], yc)
+        fields.append(np.maximum(dr.convergence(u, v, DX, DX), 0.))
+    r = dr.root_steps(dr.steps(_track(path), N * DX, N * DX), lambda f: fields[f], DX, DX, N * DX, N * DX)
+    tol = 1.e-13 * DX                                            # measured 9e-15 cells (symmetric inflow)
+    assert np.abs(r["rx"] - 2. * DX).max() < tol and np.abs(r["ry"]).max() < tol
+    assert np.abs(r["ur"] - DX / DT).max() < tol / DT and np.abs(r["vr"]).max() < tol / DT
+
+
 def test_pattern_shift_recovers_whole_and_part_cells():
     rng = np.random.default_rng(5)
     ky, kx = np.meshgrid(np.fft.fftfreq(N), np.fft.rfftfreq(N), indexing="ij")

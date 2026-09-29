@@ -82,6 +82,8 @@ V3_HF = [
     ("dump", "hf_zmax", "6000"), ("dump", "hf_dumplist", "u,v,w,thl,qt,p"),
 ]
 V3_HF_60S = {("2stream", 1), ("raytracer", 1)}     # every other member samples at 300 s
+# 60 s cross-sections at the lowest level and at 100 m (w at the surface is zero), with u and v for the convergence.
+V3_CROSS_XY, V3_CROSS_ADD = "0,100", ("u", "v")
 V3_MASKS = ("couvreux", "wplus", "ql", "qlcore")
 LAND = "cass_land_composite_12utc.nc"            # ERA5 soil and vegetation at the start hour (cass_land_composite.py)
 V3_INPUT_ARGS = ["--zero-winds", "--nudge-scalars", "--exner-ls", "--taper-wls", "--land-composite", LAND]
@@ -194,6 +196,10 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False, version: str = "v3") -
         for sec, key, val in V3 + V3_HF:
             cfg.set(sec, key, val)
         cfg.set("dump", "hf_sampletime", "60" if (rt, rndseed) in V3_HF_60S else "300")
+        if rt in RADS["v3"]:
+            cfg.set("cross", "xy", V3_CROSS_XY)
+            have = cfg.get("cross", "crosslist").split(",")
+            cfg.set("cross", "crosslist", ",".join(have + [v for v in V3_CROSS_ADD if v not in have]))
         import netCDF4
         with netCDF4.Dataset(SHARED_DIR / "data" / LAND) as f:
             for key in V3_LAND_KEYS:
