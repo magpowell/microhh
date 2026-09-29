@@ -136,7 +136,9 @@ See `analysis/` for plotting and analysis tools.
 ## Gotchas
 
 - **MicroHH `zi` broken for shallow Cu** -- saturates at domain top. Use min(thv_flux) in [500,3500]m or ql_frac for cloud base.
-- Raytracer has larger SEB residual than 2stream (cause unknown).
+- In ray tracer runs the statistics and cross-sections `sw_flux_dn`, `sw_flux_up`, `sw_flux_dn_dir` are two-stream
+  fluxes; the surface receives `sw_flux_sfc_dir_rt` + `sw_flux_sfc_dif_rt` - `sw_flux_sfc_up_rt`. A surface energy
+  balance computed with the former shows a false residual of up to 11 W m-2 (`rerun_plan_2026-09.md`, section 20).
 - `cass_input.py` reads `cass.ini` from CWD -- must be called from within run dir.
 - `swlspres=geo` silently fills u_geo/v_geo with zeros if absent from input.nc.
 - Re-run setup scripts after restructuring -- stale symlinks break runs silently.

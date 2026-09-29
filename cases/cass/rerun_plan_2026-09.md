@@ -532,3 +532,49 @@ and in the build files. The radiation submodule is at the commit upstream pins (
 
   The two sources differ by the nudging factor per variable, which leaves runs without `nudgefac_<variable>`
   unchanged (section 14, further tests). The source has not changed since 8dfd95410.
+
+## 20. Surface energy balance residual of ray tracer runs: a diagnostic, not a leak (2026-09-29)
+
+The old figures showed a residual of net radiation minus (H + LE + G + S) in ray tracer runs: zero before the first
+clouds, down to -11 W/m2 at midday, up to +5 W/m2 in the late afternoon; zero in two-stream runs.
+
+- How the residual was computed: `analysis/cass_analysis.py`, `seb_residual`. H, LE, G, S are the values of the land
+  surface model (statistics group `land_surface`). Net radiation came from the profiles `sw_flux_dn`, `sw_flux_up`,
+  `lw_flux_dn`, `lw_flux_up` of group `radiation` at the surface level.
+- What the model does in ray tracer mode (`src/radiation_rrtmgp_rt.cu`): every shortwave call computes the
+  two-stream fluxes (`rte_sw_rt.rte_sw`, l.1802) and, in daytime, the ray-traced ones (`raytracer.trace_rays`,
+  l.1835). The land surface model receives the ray-traced surface fluxes (`store_surface_fluxes_rt`, l.133-153 and
+  l.2240-2252: downwelling = direct + diffuse, upwelling from the ray tracer; read by the land model through
+  `get_surface_radiation_g`, `src/boundary_surface_lsm.cu` l.113-116). The atmosphere is heated by the ray-traced
+  absorption (`calc_tendency_rt`, l.59-85, l.2208-2219). The profiles `sw_flux_up`, `sw_flux_dn`, `sw_flux_dn_dir`
+  of the statistics and of the cross-sections are filled with the TWO-STREAM fluxes (l.2367-2369, l.2562-2564).
+  Longwave is one solver in both modes.
+- The fluxes the land model uses are written: time series `sw_flux_sfc_dir_rt`, `sw_flux_sfc_dif_rt`,
+  `sw_flux_sfc_up_rt` in group `radiation` (l.2608-2610), cross-sections of the first two (in our list).
+- Test on v2 (four members, 06:30 to 17:30 local solar time, `analysis/characterize/seb_residual.py`):
+
+| Two-stream minus ray-traced surface shortwave | rms difference from the residual | correlation |
+|---|---|---|
+| net | 0.48 W/m2 | 0.999 |
+| downwelling | 1.98 | 0.999 |
+| upwelling | 3.83 | 0.999 |
+| direct | 17.9 | -0.03 |
+| diffuse | 16.2 | 0.53 |
+
+  The residual of the old figure (-11.4 to +5.0 W/m2) IS the two-stream net shortwave minus the ray-traced one. With
+  the net radiation the land model receives the residual is 0.44 W/m2 in the mean and at most 1.1 W/m2 in 3D
+  (1D: 0.10 and 0.56).
+- v3 small ray tracer test (old binary, to 20 UTC, clouds from 16:35 UTC): residual with the ray-traced net
+  radiation mean 0.42, largest 0.86 W/m2; with the two-stream net radiation mean -3.0, largest 14.0. Fixed binary
+  (to 15 UTC, no clouds yet): 0.49 and 0.57 on the land and on the atmosphere side, received equals reported flux
+  to 8e-15. The check of section 14 (mean 0.10, largest 2.0 W/m2) was a two-stream run.
+- The ray tracer conserves energy (v3 small test, 13 to 20 UTC): net shortwave at the domain top minus net at the
+  surface minus the absorption in the atmosphere is -0.03 to -0.27 W/m2 of up to 934; the heating applied to the
+  model equals shortwave absorption plus longwave flux convergence to 0.000 W/m2. Two-stream minus ray-traced with
+  clouds: domain top net -11.6, surface net -11.7, absorption below 0.7 W/m2.
+- Consequences: in ray tracer runs take the net radiation and the surface shortwave from the `_rt` time series
+  or cross-sections. `sw_flux_dn`, `sw_flux_up`, `sw_flux_dn_dir` (profiles and cross-sections) of a ray tracer
+  run are what a two-stream calculation on the 3D run's clouds gives. `cass_analysis.load_stats` now returns the
+  net radiation the land model receives (`Rnet`) and `sw_dn_sfc`, `sw_up_sfc`; `sw_dn`, `sw_up` stay two-stream.
+  `shared/check_surface_coupling.py` does the same.
+- The time axis of the old figure is local clock time (the features are at 9.8, 12.8 and 15.7 h local solar time).
