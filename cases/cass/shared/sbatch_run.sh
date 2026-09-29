@@ -37,6 +37,8 @@ IFS=':' read -ra DIRS <<< "$SIM_DIRS"
 echo "Starting ${#DIRS[@]} CASS simulation(s) at $(date)"
 echo "Node: $(hostname)  GPUs: ${SLURM_GPUS_ON_NODE:-?}  JobID: ${SLURM_JOB_ID:-?}"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null
+echo "Repo commit: $(git -C "$MICROHH_DIR" rev-parse HEAD 2>/dev/null) $(git -C "$MICROHH_DIR" diff --quiet HEAD -- src include cases/cass 2>/dev/null || echo '(uncommitted changes)')"
+for d in "${DIRS[@]}"; do [[ -n "$d" ]] && echo "Binary: $(sha256sum "$(readlink -f "$d/microhh")" | cut -c1-16) $(readlink -f "$d/microhh")"; done
 
 srun -n ${#DIRS[@]} bash -c '
     export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID

@@ -36,6 +36,17 @@ parser.add_argument('--sun-wind', type=float, default=None, metavar='U',
                          'Mutually exclusive with --zero-winds, --wind-u, --geo-wind.')
 parser.add_argument('--nudge-timescale', type=float, default=10800., metavar='SECONDS',
                     help='Nudging timescale for u,v (s). Default: 10800 (3 h).')
+parser.add_argument('--nudge-scalars', action='store_true',
+                    help='CASS specification: nudge thl and qt toward the composite sounding aloft. '
+                         'nudgefac is 0 below --nudge-zbot and 1/--nudge-scalar-timescale above --nudge-ztop. '
+                         'Needs [force] nudgelist=thl,qt and timedeplist_nudge=thl,qt (one nudgefac for all).')
+parser.add_argument('--nudge-zbot', type=float, default=4500., metavar='M')
+parser.add_argument('--nudge-ztop', type=float, default=5000., metavar='M')
+parser.add_argument('--nudge-scalar-timescale', type=float, default=3600., metavar='SECONDS')
+parser.add_argument('--exner-ls', action='store_true',
+                    help='Convert the CASS temperature tendency to a theta_l tendency (divide by Exner).')
+parser.add_argument('--taper-wls', action='store_true',
+                    help='Let w_ls go linearly to zero from the lowest table level to the surface.')
 args = parser.parse_args()
 
 if args.wind_u is not None and args.zero_winds:
@@ -232,12 +243,19 @@ for t, block in enumerate(time_blocks):
     vls_data = data[:, 5]  # V wind (m/s)
     wls_data = data[:, 6]  # Subsidence velocity (m/s)
 
+    if args.exner_ls:
+        tls = tls / (data[:, 1] / 1000.)**(287.04 / 1005.)
+    if args.taper_wls:
+        z_lsf_w, wls_data = np.r_[0., z_lsf], np.r_[0., wls_data]
+    else:
+        z_lsf_w = z_lsf
+
     # Interpolate to model grid
     thlls[t, :] = np.interp(z, z_lsf, tls)
     qtls[t, :] = np.interp(z, z_lsf, qls)
     uls[t, :] = np.interp(z, z_lsf, uls_data)
     vls[t, :] = np.interp(z, z_lsf, vls_data)
-    wls[t, :] = np.interp(z, z_lsf, wls_data)
+    wls[t, :] = np.interp(z, z_lsf_w, wls_data)
 
 # Replace qt_ls with a constant-in-time, height-stepped profile if requested.
 # Profile: VALUE (g/kg/day → kg/kg/s) below 2000 m, zero above.
@@ -320,7 +338,12 @@ if args.geo_wind is not None:
     add_nc_var("v_geo", ("z",), nc_group_init, np.zeros(kmax))
 # For --sun-wind, u_geo/v_geo are written to the timedep group below.
 nudge_timescale = args.nudge_timescale
-add_nc_var("nudgefac", ("z",), nc_group_init, np.ones(kmax) / nudge_timescale)
+if args.nudge_scalars:
+    ramp = np.clip((z - args.nudge_zbot) / (args.nudge_ztop - args.nudge_zbot), 0., 1.)
+    nudgefac = 0.5 * (1. - np.cos(np.pi * ramp)) / args.nudge_scalar_timescale
+else:
+    nudgefac = np.ones(kmax) / nudge_timescale
+add_nc_var("nudgefac", ("z",), nc_group_init, nudgefac)
 
 # Aerosol initial profiles: composite-mean on LES z grid
 for name in aerosol_names:
@@ -358,6 +381,10 @@ else:
     u_nudge_arr = uls; v_nudge_arr = vls
 add_nc_var("u_nudge", ("time_ls", "z"), nc_group_timedep, u_nudge_arr)
 add_nc_var("v_nudge", ("time_ls", "z"), nc_group_timedep, v_nudge_arr)
+if args.nudge_scalars:
+    # The CASS sounding is the same at day 205.5 and 206.5, so the target is constant in time.
+    add_nc_var("thl_nudge", ("time_ls", "z"), nc_group_timedep, np.tile(thl, (n_times, 1)))
+    add_nc_var("qt_nudge", ("time_ls", "z"), nc_group_timedep, np.tile(qt, (n_times, 1)))
 
 # For --sun-wind: write u_geo, v_geo to the timedep group (aligned with the
 # nudge target) so swtimedep_geo=true picks them up; Coriolis tendency then
@@ -437,6 +464,14 @@ wind_desc = ("zero winds" if args.zero_winds
              else f"sun-tracking wind, U={args.sun_wind:.1f} m/s anti-solar (time-dep u_nudge, v_nudge, u_geo, v_geo)" if args.sun_wind is not None
              else "ERA5 composite winds")
 print(f"   winds: {wind_desc}")
-print(f"   nudgefac = 1/{nudge_timescale:.0f} s [u,v only]")
+if args.nudge_scalars:
+    print(f"   nudgefac = 0 below {args.nudge_zbot:.0f} m, 1/{args.nudge_scalar_timescale:.0f} s above "
+          f"{args.nudge_ztop:.0f} m [thl, qt]")
+else:
+    print(f"   nudgefac = 1/{nudge_timescale:.0f} s [u,v only]")
+if args.exner_ls:
+    print("   thl_ls: CASS temperature tendency divided by Exner")
+if args.taper_wls:
+    print("   w_ls: linear to zero below the lowest table level")
 if args.qt_ls is not None:
     print(f"   qt_ls: constant {args.qt_ls:+.1f} g/kg/day below 2000 m (overrides CASS composite)")

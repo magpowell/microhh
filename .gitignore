@@ -16,3 +16,4 @@ build_gpu_new/
 
 # site data staged outside git
 shared_data/
+build_gpu_hf/

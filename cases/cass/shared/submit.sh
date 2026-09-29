@@ -56,14 +56,16 @@ if [[ "$EXPT" == "base" ]]; then
 else
     SETUP="$CASS_DIR/experiments/$EXPT/setup_$EXPT.py"
     RUN_ROOT="$SCRATCH/CASS_LES/experiments/$EXPT"
-    # no_aerosols_zero_wind writes to a _v2 root (see its setup script).
-    [[ "$EXPT" == "no_aerosols_zero_wind" ]] && RUN_ROOT="${RUN_ROOT}_v2"
+    # no_aerosols_zero_wind writes to a versioned root (see its setup script).
+    [[ "$EXPT" == "no_aerosols_zero_wind" ]] && RUN_ROOT="${RUN_ROOT}_${CASS_VERSION:-v3}"
 fi
 [[ -f "$SETUP" ]] || { echo "no setup script: $SETUP" >&2; exit 1; }
 if [[ $DEBUG == 1 ]]; then
     RUN_ROOT="$SCRATCH/CASS_LES/debug/$EXPT"
+    [[ "$EXPT" == "no_aerosols_zero_wind" ]] && RUN_ROOT="${RUN_ROOT}_${CASS_VERSION:-v3}"
     SETUP_ARGS=(--debug "${SETUP_ARGS[@]}")
 fi
+[[ "$EXPT" == "no_aerosols_zero_wind" ]] && SETUP_ARGS=(--version "${CASS_VERSION:-v3}" "${SETUP_ARGS[@]}")
 
 LOGS="$SCRATCH/CASS_LES/logs"
 mkdir -p "$LOGS"

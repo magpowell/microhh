@@ -10,8 +10,13 @@ Aerosols off, zero winds. Dual purpose:
   2. Source of nudge profiles for the mean_state_nudge experiment
      (extract from 2stream column output after these runs complete).
 
+Versions:
+  v2  6.4 km domain, u/v nudging on 3 h (archived on HPSS; the root on scratch holds restored data).
+  v3  8 km domain, thl/qt nudging above 5 km on 1 h, pressure in the dumps, core mask and tendency
+      statistics, third configuration raytracer_swmatch. See V3 below.
+
 Usage:
-  python setup_no_aerosols_zero_wind.py [--dry-run] [--debug]
+  python setup_no_aerosols_zero_wind.py [--version v3] [--dry-run] [--debug] [--input-args ...]
 """
 
 import argparse
@@ -43,10 +48,34 @@ MICROHH_EXEC = Path(os.environ.get("MICROHH_EXEC", MICROHH_DIR / "build_gpu" / "
 CASS_DIR     = MICROHH_DIR / "cases" / "cass"
 SHARED_DIR   = CASS_DIR / "shared"
 SCRATCH      = Path(os.environ["SCRATCH"])
-EXP_SCRATCH  = SCRATCH / "CASS_LES" / "experiments" / "no_aerosols_zero_wind_v2"
+EXP_NAME     = "no_aerosols_zero_wind"
 
-RADS = ["2stream", "raytracer"]
+RADS = {"v2": ["2stream", "raytracer"], "v3": ["2stream", "raytracer", "raytracer_swmatch"]}
 REPS = [1, 2, 3, 4]
+
+# (section, key, value) overrides of the merged ini.
+V3 = [
+    ("grid", "zsize", "8000"), ("grid", "ktot", "320"),
+    ("buffer", "zstart", "6400"),
+    ("boundary", "z0m", "0.035"),      # CASS specification; z0h is not specified there and stays at 0.003
+    ("force", "nudgelist", "thl,qt"), ("force", "timedeplist_nudge", "thl,qt"),
+    ("stats", "swtendency", "1"),
+    ("micro", "swmicrobudget", "1"),
+    ("dump", "dumplist", "p,ql,b,qt,thl,w,couvreux"),
+]
+# High-frequency 3D stream (float32, below hf_zmax): 11:58 to 16:03 local solar time for a 12:00 UTC start.
+V3_HF = [
+    ("dump", "swhf", "1"), ("dump", "hf_starttime", "23700"), ("dump", "hf_endtime", "38400"),
+    ("dump", "hf_zmax", "6000"), ("dump", "hf_dumplist", "u,v,w,thl,qt,p"),
+]
+V3_HF_60S = {("2stream", 1), ("raytracer", 1)}     # every other member samples at 300 s
+V3_MASKS = ("couvreux", "wplus", "ql", "qlcore")
+V3_INPUT_ARGS = ["--zero-winds", "--nudge-scalars", "--exner-ls", "--taper-wls"]
+
+
+def exp_root(version: str, debug: bool) -> Path:
+    base = SCRATCH / "CASS_LES" / ("debug" if debug else "experiments")
+    return base / f"{EXP_NAME}_{version}"
 
 DEBUG_GRID = {"itot": "64", "jtot": "64", "xsize": "6400.", "ysize": "6400."}
 
@@ -88,7 +117,7 @@ def symlink(src: Path, dst: Path, dry_run: bool):
     print(f"  link {dst.name} -> {src}")
 
 
-def merge_ini(rndseed: int, rt: str, debug: bool = False) -> configparser.ConfigParser:
+def merge_ini(rndseed: int, rt: str, debug: bool = False, version: str = "v3") -> configparser.ConfigParser:
     cfg = configparser.ConfigParser(
         interpolation=None,
         comment_prefixes=("#", ";"),
@@ -97,8 +126,10 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False) -> configparser.Config
     cfg.optionxform = str
     cfg.read([
         SHARED_DIR / "config" / "cass_base.ini",
-        SHARED_DIR / "config" / f"cass_{rt}.ini",
+        SHARED_DIR / "config" / f"cass_{rt.split('_')[0]}.ini",
     ])
+    if rt == "raytracer_swmatch":
+        cfg.set("radiation", "swscalesfc_to_2str", "true")
     cfg.set("fields", "rndseed", str(rndseed))
     cfg.set("aerosol", "swaerosol", "false")
     # Add evisc to 3D dumps for SGS flux correction in cloud-root composites
@@ -128,7 +159,7 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False) -> configparser.Config
     # stats.cxx:561 auto-appends it, and listing it explicitly produces a duplicate
     # that leaves domain-mean stats (ql_cover, qlqi_path, thl, qt, ...) all zero/NaN.
     masklist = cfg.get("stats", "masklist", fallback="")
-    for m in ("couvreux", "wplus", "ql"):
+    for m in (V3_MASKS if version == "v3" else ("couvreux", "wplus", "ql")):
         if m not in masklist.split(","):
             masklist += ("," if masklist else "") + m
     cfg.set("stats", "masklist", masklist)
@@ -136,6 +167,10 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False) -> configparser.Config
     dumplist = cfg.get("dump", "dumplist")
     if "couvreux" not in dumplist:
         cfg.set("dump", "dumplist", dumplist + ",couvreux")
+    if version == "v3":
+        for sec, key, val in V3 + V3_HF:
+            cfg.set(sec, key, val)
+        cfg.set("dump", "hf_sampletime", "60" if (rt, rndseed) in V3_HF_60S else "300")
     if debug:
         for k, v in DEBUG_GRID.items():
             cfg.set("grid", k, v)
@@ -149,15 +184,16 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False) -> configparser.Config
     return cfg
 
 
-def setup_rep(rt: str, rep: int, dry_run: bool, debug: bool = False):
-    run_root = SCRATCH / "CASS_LES" / "debug" / "no_aerosols_zero_wind" if debug else EXP_SCRATCH
-    run_dir = run_root / rt / f"rep_{rep:02d}"
-    print(f"\n--- no_aerosols_zero_wind/{rt}/rep_{rep:02d} ---")
+def setup_rep(rt: str, rep: int, dry_run: bool, debug: bool = False, version: str = "v3", input_args=None):
+    run_dir = exp_root(version, debug) / rt / f"rep_{rep:02d}"
+    print(f"\n--- no_aerosols_zero_wind_{version}/{rt}/rep_{rep:02d} ---")
+    if not dry_run and any(run_dir.glob("*.[0-9][0-9][0-9][0-9][0-9][0-9][0-9]")):
+        raise SystemExit(f"{run_dir} already holds model output; refusing to set it up again")
 
     if not dry_run:
         run_dir.mkdir(parents=True, exist_ok=True)
 
-    cfg = merge_ini(rndseed=rep, rt=rt, debug=debug)
+    cfg = merge_ini(rndseed=rep, rt=rt, debug=debug, version=version)
     if dry_run:
         print(f"  [dry] write cass.ini  (rndseed={rep}, swaerosol=false, zero winds)")
     else:
@@ -176,13 +212,15 @@ def setup_rep(rt: str, rep: int, dry_run: bool, debug: bool = False):
     for name in CASE_DATA:
         symlink(SHARED_DIR / "data" / name, run_dir / name, dry_run)
 
+    if input_args is None:
+        input_args = V3_INPUT_ARGS if version == "v3" else ["--zero-winds"]
     if dry_run:
-        print("  [dry] python cass_input.py --zero-winds")
+        print("  [dry] python cass_input.py " + " ".join(input_args))
         return
 
-    print("  running cass_input.py --zero-winds ...")
+    print("  running cass_input.py " + " ".join(input_args) + " ...")
     result = subprocess.run(
-        [sys.executable, "cass_input.py", "--zero-winds"],
+        [sys.executable, "cass_input.py", *input_args],
         cwd=run_dir,
         capture_output=True,
         text=True,
@@ -201,18 +239,21 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="Print actions without executing")
     parser.add_argument("--debug", action="store_true",
-                        help="64x64 grid, rep_01 only, scratch under CASS_LES/debug/no_aerosols_zero_wind/")
+                        help="64x64 grid, rep_01 only, scratch under CASS_LES/debug/no_aerosols_zero_wind_<version>/")
+    parser.add_argument("--version", default="v3", choices=sorted(RADS))
+    parser.add_argument("--rt", nargs="+", default=None, help="subset of the radiation configurations")
+    parser.add_argument("--input-args", nargs=argparse.REMAINDER, default=None,
+                        help="arguments for cass_input.py, replacing the version default (must come last)")
     args = parser.parse_args()
 
     reps = [1] if args.debug else REPS
-    run_root = SCRATCH / "CASS_LES" / "debug" / "no_aerosols_zero_wind" if args.debug else EXP_SCRATCH
-    print(f"Setting up no_aerosols_zero_wind runs in: {run_root}")
+    print(f"Setting up no_aerosols_zero_wind runs in: {exp_root(args.version, args.debug)}")
     if args.dry_run:
         print("(dry run — no changes will be made)\n")
 
-    for rt in RADS:
+    for rt in (args.rt or RADS[args.version]):
         for rep in reps:
-            setup_rep(rt, rep, args.dry_run, args.debug)
+            setup_rep(rt, rep, args.dry_run, args.debug, args.version, args.input_args)
 
     print("\nDone. Run submit_no_aerosols_zero_wind.sh to launch the jobs.")
 
