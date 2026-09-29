@@ -2,7 +2,8 @@
 
 Status snapshot 2026-09-21, branch `mpowell-local` (HEAD after commits fb37f5639 merge of upstream main,
 36e6ab0ef bug fixes, 256c7f4c5 Perlmutter cmake). Written so the work can continue on another machine.
-`project_directive.md` is still the science reference but has NOT yet been updated with the findings below.
+`project_directive.md` (the April 2026 framing) was removed on 2026-09-29; git history keeps it (last in commit
+46be6510c). Its list of gotchas is in `README.md`.
 
 ## 1. Why rerun: the forcing time-origin offset
 
@@ -96,7 +97,7 @@ state with no radiatively driven surface pattern?
   subcloud mean, or ground-relative |U(z_b)|), z_b from `compute_z_sl`, w* from surface `thv_flux`. Plot deficits
   against S = 1 / R so u = 0 stays on the axis. Figures are deferred.
 
-## 6. Other findings (2026-09-21) still to fold into project_directive.md
+## 6. Other findings (2026-09-21)
 
 - wind_sun (archived on HPSS as `wind_sun.tar`) is MISALIGNED: `solar_azimuth_deg` assumed a 12:00 UTC start
   while the ini said 10:30 UTC, so the prescribed wind was 12-65 degrees off anti-solar (56 degrees at solar noon).
@@ -136,7 +137,7 @@ state with no radiatively driven surface pattern?
 4. Debug-verify homogenization (section 5) on u = 0 and u = 10, both RT.
 5. Launch base first so every sweep has its reference; then the sweeps, one submit each with wait-and-report
    watchers (no resubmit loops); archive to HPSS per experiment.
-6. Update `project_directive.md`, `README.md`, `analysis/README.md` from sections 1-6.
+6. Update `README.md`, `analysis/README.md` from sections 1-6.
 
 ## 9. Empire AI Alpha status (answers from the Alpha checkout, 2026-09-21)
 

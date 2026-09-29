@@ -1,7 +1,8 @@
 # CASS LES — Launch Guide
 
 **Goal**: understand how 3D (raytracer) vs 1D (2stream) radiative transfer affects
-shallow cumulus cloud LWP over land. See `project_directive.md` for full context.
+shallow cumulus cloud LWP over land. See `rerun_plan_2026-09.md` for the current runs (sections 11 to 16
+describe v3).
 
 ---
 
@@ -129,6 +130,16 @@ scripts locate the repo from their own path and require `SCRATCH`, on every mach
 Stats: `$RUN_DIR/cass.default.0000000.nc` (sampled every 300 s).
 Key groups: `lsm` (land surface), `thermo`, `radiation`.
 See `analysis/` for plotting and analysis tools.
+
+---
+
+## Gotchas
+
+- **MicroHH `zi` broken for shallow Cu** -- saturates at domain top. Use min(thv_flux) in [500,3500]m or ql_frac for cloud base.
+- Raytracer has larger SEB residual than 2stream (cause unknown).
+- `cass_input.py` reads `cass.ini` from CWD -- must be called from within run dir.
+- `swlspres=geo` silently fills u_geo/v_geo with zeros if absent from input.nc.
+- Re-run setup scripts after restructuring -- stale symlinks break runs silently.
 
 ---
 
