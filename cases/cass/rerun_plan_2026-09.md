@@ -452,3 +452,47 @@ same sun height 112 s, daily mean in v2 54 s).
 
 Each ray tracer job has a restart job chained to it (`sbatch_restart.sh`, jobs 59088462, 59088464, 59088467,
 59088468), which exits at once when the run is complete.
+
+## 17. 60 s cross-sections at two heights (2026-09-29, runs 1 and 2)
+
+The 60 s cross-section of w was taken at `xy = 0`, the surface, where w is zero (in every run, v2 included). Runs 1
+and 2 now have `[cross] xy = 0,100` and u, v in the cross-section list; runs 3 and 4 keep `xy = 0`.
+
+- MicroHH applies the heights to every 3D variable of the list: 13 more slices per frame (at 100 m: u, v, w, thl,
+  qt, ql, b and four radiation fluxes; at the lowest level: u, v). Full-level variables are at 12.5 and 112.5 m, w
+  and the radiation fluxes at 0 and 100 m. About 23 GB more per member during the run.
+- The eight inis were changed while the jobs were held and before any had started; the previous ini is kept in each
+  folder as `cass.ini.before_cross_change`. The setup script writes the same inis (`V3_CROSS_XY`, `V3_CROSS_ADD`).
+- Check (job 59088618, 64 x 64, same binary): same sequence of time steps and byte-identical 3D fields at 3600,
+  10800 and 18000 s; 1105 of 1109 statistics variables identical, `thv_diff` and `thv_flux` differ in the last bit
+  (relative 7e-16), as in the comparisons of section 14. The ray tracer run writes the new fields.
+- The new fields are consistent: w at 25 m equals the layer depth times the convergence of u and v at 12.5 m to
+  3e-16; the w cross-section at 100 m equals the 3D file.
+
+## 18. Changes to the model source relative to upstream MicroHH (review of 2026-09-29)
+
+Upstream reference: `origin/main` 736a2f5ef. The branch differs in 21 source files (447 lines added, 30 removed)
+and in the build files. The radiation submodule is at the commit upstream pins (416a6706), unchanged.
+
+| Change | Files | Switch, default | Effect on an upstream configuration |
+|---|---|---|---|
+| Land surface uses the density of the dynamics (c40a8615c) | `boundary_surface_lsm.cxx`, `.cu` | none | CHANGES the solution of every run with the land-surface model: section 14 |
+| Nudging factor per variable (5a2770606) | `force.cxx`, `.cu`, `force.h` | input variable `nudgefac_<var>`, absent | none |
+| Second 3D dump stream (c58b72478) | `dump.*`, `field3d_io.*`, `fields.cxx`, `thermo_moist.cxx` | `[dump] swhf`, off | none; when on, the sample times enter the time-step limiter, which leaves the steps unchanged only if each sample time is already an output or radiation time (true in v3) |
+| `rs_scale` (5cf6006a7) | land-surface kernels, `boundary_surface_lsm.*` | `[land_surface] rs_scale`, 1.0 | none |
+| Soil moisture nudging (544b1d2ec) | soil kernels, `boundary_surface_lsm.*` | `[land_surface] swnudge_theta`, off | none |
+| `swscalesfc_to_2str` (5cf6006a7) | `radiation_rrtmgp_rt.*` | `[radiation] swscalesfc_to_2str`, off | none |
+| `swqsqg_to_rad` (9ec3989a8, GoAmazon and ARM97SD) | `thermo_moist.*` | `[thermo] swqsqg_to_rad`, off | none |
+| Build | `src/CMakeLists.txt`, `config/default.cmake`, `config/empireai_alpha.cmake` | | none on the solution |
+
+- One change alters the physics of an existing configuration: the land-surface density. It is a correction of an
+  error that upstream has as well; which density belongs in the bulk formulas is a question for the MicroHH
+  developers (the air at the first level has 1.109 kg/m3 at midday, the density of the dynamics 1.148, the
+  thermodynamic surface value 1.065).
+- The Couvreux tracer, the decay and the `qlcore` mask are upstream features. No source change was found for the
+  NaN crash noted in early 2026.
+- Found in the review, not yet acted on: the dump stream stores two flags in `do_dump` that a build with OpenMP could
+  reset while a dump is being written (our builds have OpenMP off); `rs_scale` could be replaced by scaling
+  `rs_veg_min` and `rs_soil_min` in the case input; soil moisture nudging reads its target only for homogeneous
+  surfaces but applies it regardless; the edit of `src/CMakeLists.txt` (cuFFT and cuRAND removed from the link line)
+  belongs in the machine file.
