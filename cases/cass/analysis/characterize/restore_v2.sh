@@ -10,8 +10,9 @@
 set -uo pipefail
 PARENT=${PARENT:-$SCRATCH/CASS_LES/experiments}
 TAR=/home/m/mpowell/CASS_LES/no_aerosols_zero_wind_v2/no_aerosols_zero_wind_v2.tar
-LIST=$PARENT/members_v2_characterize.txt
-SIZES=$PARENT/members_v2_characterize.sizes
+NAME=${NAME:-members_v2_characterize}      # member list basename in $PARENT
+LIST=$PARENT/$NAME.txt
+SIZES=$PARENT/$NAME.sizes
 
 cd "$PARENT" || exit 1
 echo "Restoring $(wc -l < "$LIST") members into $PARENT at $(date)"

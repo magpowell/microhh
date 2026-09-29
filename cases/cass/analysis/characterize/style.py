@@ -20,7 +20,7 @@ def apply(ax):
 
 
 def panel(ax, k, label=""):
-    ax.set_title(f"({'abcdefghijkl'[k]}) {label}".rstrip(), loc="left", fontsize=11)
+    ax.set_title(f"({'abcdefghijklmnopqrstuvwxyz'[k]}) {label}".rstrip(), loc="left", fontsize=11)
 
 
 def zero_line(ax, vertical=False):

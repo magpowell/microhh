@@ -116,6 +116,98 @@ def figure5(expt, izb=2):
     return st.savefig(fig, expt, f"fig5_activation_thr{izb}")
 
 
+CMAP_ANOM = "RdBu_r"
+DIRS = ("parallel", "perpendicular")
+
+
+def ens(expt, rt, t):
+    """Ensemble mean of the per-member composites; members weighted equally."""
+    m = load(expt, "composite", rt, t)
+    keep = [v for v in m[0].data_vars if "cloud" not in m[0][v].dims]
+    return xr.concat([d[keep] for d in m], dim="member").mean("member"), m
+
+
+def row_label(ax, text):
+    ax.annotate(text, xy=(0, 0.5), xycoords="axes fraction", xytext=(-52, 0), textcoords="offset points",
+                ha="center", va="center", rotation=90, fontweight="bold", fontsize=10)
+
+
+def figure6(expt, t, vlim=4.e-3):
+    """Buoyancy anomaly and circulation around clouds, one snapshot."""
+    c = {lab: ens(expt, rt, t)[0] for rt, lab in RTS}
+    c["3D - 1D"] = c["3D"] - c["1D"]
+    fig = plt.figure(figsize=(9., 9.2), layout="constrained")
+    gs = fig.add_gridspec(4, 3, height_ratios=(1, 1, 1, 0.38), width_ratios=(1, 1, 0.035))
+    k = 0
+    for i, lab in enumerate(("1D", "3D", "3D - 1D")):
+        for j, dr in enumerate(DIRS):
+            ax = fig.add_subplot(gs[i, j])
+            d = c[lab].sel(dir=dr)
+            im = ax.pcolormesh(d["xl"], d["znd"], d["b"], cmap=CMAP_ANOM, vmin=-vlim, vmax=vlim, rasterized=True)
+            q = d.isel(xl=slice(4, None, 10), znd=slice(4, None, 7))
+            ax.quiver(q["xl"], q["znd"], q["us"], q["w"], scale=22., width=0.004, color="0.15")
+            for x in (-0.5, 0.5):
+                ax.axvline(x, color="0.4", lw=0.6, ls="--")
+            ax.set(xlim=(-1, 1), ylim=(0, 1))
+            ax.tick_params(labelbottom=False, labelleft=(j == 0), labelsize=8)
+            if j == 0:
+                ax.set_ylabel(r"$z / z_b$ [-]")
+                row_label(ax, lab)
+            st.panel(ax, k, dr if i == 0 else "")
+            k += 1
+    cb = fig.colorbar(im, cax=fig.add_subplot(gs[:3, 2]))
+    cb.set_label(r"buoyancy anomaly [m s$^{-2}$]")
+    h = []
+    for j, dr in enumerate(DIRS):
+        ax = fig.add_subplot(gs[3, j])
+        for rt, lab in RTS:
+            e, m = ens(expt, rt, t)
+            pct = np.array([(d["sw"].sel(dir=dr) / float(d["sw_domain"]) - 1.) * 100. for d in m])
+            ax.fill_between(e["xl"], pct.min(axis=0), pct.max(axis=0), alpha=0.25, lw=0, **st.RT[lab])
+            l, = ax.plot(e["xl"], pct.mean(axis=0), lw=1.8, label=lab, **st.RT[lab])
+            if j == 0:
+                h.append(l)
+        st.zero_line(ax)
+        ax.set(xlim=(-1, 1), xlabel=(r"$r_\parallel / L$ [-]" if j == 0 else r"$r_\perp / L$ [-]"))
+        ax.tick_params(labelleft=(j == 0))
+        if j == 0:
+            ax.set_ylabel("surface SW,\ndifference from\ndomain mean [%]")
+        st.apply(ax)
+        st.panel(ax, k)
+        k += 1
+    fig.legend(handles=h, ncols=2, loc="outside lower center")
+    fig.suptitle(st.lt(3.891 + t / 3600.), x=0.02, ha="left", fontsize=11)
+    return st.savefig(fig, expt, f"fig6_circulation_{int(t):07d}")
+
+
+def figure7(expt, vlim=3.e-3):
+    """Forces on the air in the sun-parallel slice, 3D minus 1D, for each snapshot."""
+    rows = (("b", "buoyancy"), ("beff", "effective\nbuoyancy"), ("a_pd", "dynamic\npressure force"), ("tot", "sum"))
+    fig, axs = plt.subplots(len(rows), len(TIMES4), figsize=(10.5, 8.2), sharex=True, sharey=True,
+                            layout="constrained")
+    for j, t in enumerate(TIMES4):
+        d = (ens(expt, "raytracer", t)[0] - ens(expt, "2stream", t)[0]).sel(dir="parallel")
+        f = dict(b=d["b"], beff=d["b"] + d["a_pb"], a_pd=d["a_pd"], tot=d["b"] + d["a_pb"] + d["a_pd"])
+        for i, (key, lab) in enumerate(rows):
+            ax = axs[i, j]
+            im = ax.pcolormesh(d["xl"], d["znd"], f[key], cmap=CMAP_ANOM, vmin=-vlim, vmax=vlim, rasterized=True)
+            for x in (-0.5, 0.5):
+                ax.axvline(x, color="0.4", lw=0.6, ls="--")
+            ax.tick_params(labelsize=8)
+            st.panel(ax, i * len(TIMES4) + j, st.lt(3.891 + t / 3600.) if i == 0 else "")
+            if j == 0:
+                ax.set_ylabel(r"$z / z_b$ [-]")
+                row_label(ax, lab)
+            if i == len(rows) - 1:
+                ax.set_xlabel(r"$r_\parallel / L$ [-]")
+    cb = fig.colorbar(im, ax=axs, shrink=0.6, pad=0.01)
+    cb.set_label(r"vertical acceleration, 3D minus 1D [m s$^{-2}$]")
+    return st.savefig(fig, expt, "fig7_forces_3D_minus_1D")
+
+
+TIMES4 = (28800, 32400, 36000, 39600)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
@@ -124,3 +216,6 @@ if __name__ == "__main__":
         print(figure1(a.expt, izb))
         print(figure4(a.expt, izb))
     print(figure5(a.expt, 2))
+    for t in TIMES4:
+        print(figure6(a.expt, t))
+    print(figure7(a.expt))
