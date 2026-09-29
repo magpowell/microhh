@@ -578,3 +578,22 @@ clouds, down to -11 W/m2 at midday, up to +5 W/m2 in the late afternoon; zero in
   net radiation the land model receives (`Rnet`) and `sw_dn_sfc`, `sw_up_sfc`; `sw_dn`, `sw_up` stay two-stream.
   `shared/check_surface_coupling.py` does the same.
 - The time axis of the old figure is local clock time (the features are at 9.8, 12.8 and 15.7 h local solar time).
+
+### Where else the two-stream outputs of ray tracer runs were read (check of 2026-09-29)
+
+| Analysis | Reads for 3D runs | Verdict |
+|---|---|---|
+| Shadow maps and composites: `characterize/composite.py` l.142-147, `characterize/neighbours.py` l.58-62, `cloud_roots/sw_surface_composite.py` l.181-194, `updrafts/slice_prep/prep_sw_surface.py` l.73-79, `cass_analysis.load_sfc_sw_dn`, `load_xy_files` (`sw_flux_sfc_rt`) | ray-traced direct + diffuse cross-sections | right |
+| `base_comparison.ipynb` cells 3, 11, 15, 16, 23; OLD notebooks (`load_sfc_sw_dn`) | the same | right |
+| Conditioned means (`compute_seb_cache.py`, `_gen_sweep_notebooks.py`) | `sw_flux_sfc_rt`, falling back to `sw_flux_dn` only when the ray-traced files are missing | right; the fallback is silent |
+| Net radiation and its residual from the statistics (`cass_analysis.load_stats`; `Rnet` in `rs_scale_comparison.ipynb`, `wind_geo_comparison.ipynb`) | two-stream | WRONG by up to 11 W/m2 of about 600; module fixed, notebooks correct themselves when rerun |
+| Shortwave heating or flux profiles | not read by any script or notebook | nothing affected |
+
+- The shortwave-matched run (`swscalesfc_to_2str`) is matched inside the model, at every radiation step, to the
+  two-stream surface flux of the SAME run (`src/radiation_rrtmgp_rt.cu` l.2266-2295): the ray-traced surface fluxes
+  are multiplied by `sw_scale_factor` = mean two-stream downwelling over mean ray-traced downwelling. No output
+  variable enters. The mean it matches is what 1D radiation gives on the 3D run's own clouds, not the mean of the 1D
+  run. In that run the `_rt` outputs are the unscaled fluxes; the land receives them times `sw_scale_factor`
+  (a time series in the statistics), and the heating is not scaled.
+- v3 has cross-sections at two heights: the loaders (`cass_analysis.load_sfc_xy`, `load_xy_files`,
+  `characterize/les_io.lowest`) now take the lowest level.

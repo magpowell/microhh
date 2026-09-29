@@ -187,8 +187,8 @@ def load_sfc_xy(run_dir, varname):
     arr = ds[varname].values
     t_sec = ds["time"].values
     ds.close()
-    # Squeeze singleton z / zh
-    if arr.ndim == 4 and arr.shape[1] == 1:
+    # Lowest level (v3 has cross-sections at two heights)
+    if arr.ndim == 4:
         arr = arr[:, 0, :, :]
     return arr, t_sec
 
@@ -501,8 +501,8 @@ def load_xy_files(run_dir, variables=None, chunks=None) -> xr.Dataset:
             continue
         ds_v = xr.open_dataset(str(f), decode_times=False, chunks=chunks)
         for dim in ("z", "zh"):
-            if dim in ds_v.dims and ds_v.sizes[dim] == 1:
-                ds_v = ds_v.squeeze(dim, drop=True)
+            if dim in ds_v.dims:     # lowest level (v3 has cross-sections at two heights)
+                ds_v = ds_v.isel({dim: 0}, drop=True)
         ds_v = ds_v.where(ds_v != -1.0e9)
         # MicroHH preallocates the time axis; skipped frames come back with the
         # netCDF fill (~9.97e+36) in both `time` and the data, which produces

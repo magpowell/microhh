@@ -14,7 +14,7 @@ from scipy import ndimage
 import masks as mk
 import pressure as pr
 import thermo as th
-from les_io import Run, eqtime_h
+from les_io import Run, eqtime_h, lowest
 from snapshot import out_path, run_dir
 
 IZB = 2                                   # cloud-base threshold 1e-3
@@ -144,7 +144,7 @@ def analyse(expt, rt, rep, t):
     S["sw"] = 0.
     for f in (rtsw if sw_from_raytracer else [run.dir / "sw_flux_dn.xy.nc"]):   # sw_flux_dn is the two-stream field
         with xr.open_dataset(f, decode_times=False) as d:
-            S["sw"] = S["sw"] + np.squeeze(d[list(d.data_vars)[0]].isel(time=it).values).astype(float)
+            S["sw"] = S["sw"] + lowest(d[list(d.data_vars)[0]].isel(time=it))
 
     kk = np.arange(kc + 1)
     zr = run.z[:kc + 1] / zb

@@ -17,6 +17,14 @@ def read_ini(run_dir):
     return cfg
 
 
+def lowest(a):
+    """2D field of a cross-section variable: the lowest level when it has several heights."""
+    for dim in ("z", "zh"):
+        if dim in a.dims:
+            a = a.isel({dim: 0})
+    return np.asarray(a.values, dtype=float)
+
+
 def eqtime_h(doy, hour_utc):
     g = 2. * np.pi / 365. * (doy - 1. + hour_utc / 24.)
     m = 229.18 * (0.000075 + 0.001868 * np.cos(g) - 0.032077 * np.sin(g)

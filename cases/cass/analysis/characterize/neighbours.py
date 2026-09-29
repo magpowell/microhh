@@ -16,7 +16,7 @@ from scipy import ndimage
 
 import thermo as th
 from composite import solar_azimuth
-from les_io import Run
+from les_io import Run, lowest
 from snapshot import out_path, run_dir
 
 RTS = ("2stream", "raytracer")
@@ -59,7 +59,7 @@ def fields(run, t):
     S["sw"] = 0.
     for f in (rtsw if all(x.exists() for x in rtsw) else [run.dir / "sw_flux_dn.xy.nc"]):
         with xr.open_dataset(f, decode_times=False) as d:
-            S["sw"] = S["sw"] + np.squeeze(d[list(d.data_vars)[0]].isel(time=it).values).astype(float)
+            S["sw"] = S["sw"] + lowest(d[list(d.data_vars)[0]].isel(time=it))
     b = np.array(run.field("b", t)[:2], dtype=float)
     S["b"] = (b - b.mean(axis=(1, 2), keepdims=True)).mean(axis=0)
     u, v = (np.array(run.field(n, t)[:NLOW], dtype=float) for n in ("u", "v"))
