@@ -93,15 +93,21 @@ tag_of() {  # $1 = sim dir
     if [[ "$val_dir" == "$RUN_ROOT" ]]; then echo "$EXPT"; else echo "${EXPT}_$(basename "$val_dir")"; fi
 }
 
+# Configurations are the folders that hold the rep_NN run dirs (2stream,
+# raytracer, raytracer_swmatch, 2stream_wind, ...). Names that start with
+# "raytracer" get the ray tracer resources, wall time and restart chain.
+mapfile -t CONFIGS < <(find "$RUN_ROOT" -mindepth 2 -maxdepth 3 -type d -name 'rep_[0-9][0-9]' \
+                       -printf '%h\n' | xargs -r -n1 basename | sort -u)
+
 NJOBS=0
-for RT in 2stream raytracer; do
+for RT in "${CONFIGS[@]}"; do
     mapfile -t DIRS < <(find_runs "$RT")
     [[ ${#DIRS[@]} -gt 0 ]] || continue
-    if [[ "$RT" == "raytracer" ]]; then
-        EXTRA=("${EXTRA_RT[@]}"); RTS=rt
+    if [[ "$RT" == raytracer* ]]; then
+        EXTRA=("${EXTRA_RT[@]}"); RTS="rt${RT#raytracer}"
         if [[ $DEBUG == 1 ]]; then W="$DEBUG_WALLTIME"; else W="$WALLTIME"; fi
     else
-        EXTRA=("${EXTRA_2S[@]}"); RTS=2s
+        EXTRA=("${EXTRA_2S[@]}"); RTS="2s${RT#2stream}"
         if [[ $DEBUG == 1 ]]; then W="$DEBUG_WALLTIME"; else W="$TS_WALLTIME"; fi
     fi
 
@@ -129,7 +135,7 @@ for RT in 2stream raytracer; do
         # Chain a restart for production raytracer jobs. afterany: the chain
         # must also run when the parent hits the wall, which is the case it
         # exists for. The restart body skips sims that already completed.
-        if [[ $DEBUG == 0 && "$RT" == "raytracer" ]]; then
+        if [[ $DEBUG == 0 && "$RT" == raytracer* ]]; then
             rid=$(sbatch --parsable "${BASE[@]}" "${EXTRA[@]}" --time="$WALLTIME" \
                 --job-name="cass_${TAG}_rst_${REP}${SUFFIX}" \
                 --dependency=afterany:"$jid" \

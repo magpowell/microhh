@@ -9,7 +9,9 @@
 #   - Auto-detects the latest savetime from the restart dumps, verifies all
 #     prognostic vars exist there, patches [time] starttime, then runs.
 #   - Skips dirs whose run already completed (nothing to do after a clean
-#     parent), and post-processes only when it actually ran.
+#     parent), and post-processes only when it actually ran. Completion is read
+#     from the last time in cass.out: a run whose endtime is not a multiple of
+#     savetime leaves no restart files at its end.
 #
 # After any restart: pass `-t0 0` to 3d_to_nc.py / cross_to_nc.py to convert
 # the full timeline, not the restart segment. The original ini is kept as
@@ -52,9 +54,10 @@ srun -n ${#DIRS[@]} bash -c '
     restart_t=$(echo "$last_t" | sed "s/^0*//")
     [[ -z "$restart_t" ]] && restart_t=0
 
-    endtime=$(awk -F= "/^endtime/{gsub(/[ .]/,\"\",\$2); print \$2}" cass.ini)
-    if [[ -n "$endtime" && "$restart_t" -ge "$endtime" ]]; then
-        echo "[GPU $SLURM_LOCALID] Already complete (t=${restart_t} >= ${endtime}), skipping"
+    endtime=$(awk -F= "/^endtime/{gsub(/[ \t]/,\"\",\$2); print \$2}" cass.ini)
+    out_t=$(awk "NF > 2 && \$2 + 0 == \$2 {t = \$2} END {print t + 0}" cass.out 2>/dev/null)
+    if awk -v t="${out_t:-0}" -v e="$endtime" "BEGIN {exit !(e != \"\" && t + 0 >= e + 0)}"; then
+        echo "[GPU $SLURM_LOCALID] Already complete (cass.out at t=${out_t} >= ${endtime}), skipping"
         exit 0
     fi
 
