@@ -52,7 +52,15 @@ SCRATCH      = Path(os.environ["SCRATCH"])
 EXP_NAME     = "no_aerosols_zero_wind"
 
 RADS = {"v2": ["2stream", "raytracer"], "v3": ["2stream", "raytracer", "raytracer_swmatch"]}
+# Set up only when named with --rt: two-stream radiation with the CASS surface fluxes prescribed (benchmark check).
+EXTRA_RADS = {"v3": ["2stream_prescribed"]}
 REPS = [1, 2, 3, 4]
+# (section, key, value): CASS surface fluxes from the input file, no land-surface model, no high-frequency stream.
+PRESCRIBED = [
+    ("boundary", "swboundary", "surface"), ("boundary", "sbcbot", "flux"), ("boundary", "swtimedep", "1"),
+    ("boundary", "timedeplist", "thl_sbot,qt_sbot"), ("boundary", "sbot[thl]", "0."), ("boundary", "sbot[qt]", "0."),
+    ("dump", "swhf", "0"),
+]
 
 # (section, key, value) overrides of the merged ini.
 V3 = [
@@ -180,6 +188,11 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False, version: str = "v3") -
         with netCDF4.Dataset(SHARED_DIR / "data" / LAND) as f:
             for key in V3_LAND_KEYS:
                 cfg.set("land_surface", key, f"{float(f.getncattr(key)):.4g}")
+        if rt == "2stream_prescribed":
+            for sec, key, val in PRESCRIBED:
+                cfg.set(sec, key, val)
+            cfg.remove_option("boundary", "swconstantz0")
+            cfg.remove_section("land_surface")
     if debug:
         for k, v in DEBUG_GRID.items():
             cfg.set("grid", k, v)
@@ -252,13 +265,18 @@ def main():
     parser.add_argument("--version", default="v3", choices=sorted(RADS))
     parser.add_argument("--rt", nargs="+", default=None, help="subset of the radiation configurations")
     parser.add_argument("--tag", default="", help="suffix of the debug folder, for test runs (needs --debug)")
+    parser.add_argument("--reps", type=int, nargs="+", default=None, help="subset of the members (default: all)")
     parser.add_argument("--input-args", nargs=argparse.REMAINDER, default=None,
                         help="arguments for cass_input.py, replacing the version default (must come last)")
     args = parser.parse_args()
 
     if args.tag and not args.debug:
         raise SystemExit("--tag is for debug runs only")
-    reps = [1] if args.debug else REPS
+    reps = [1] if args.debug else (args.reps or REPS)
+    known = RADS[args.version] + EXTRA_RADS.get(args.version, [])
+    for rt in (args.rt or []):
+        if rt not in known:
+            raise SystemExit(f"unknown configuration {rt}; choose from {known}")
     print(f"Setting up no_aerosols_zero_wind runs in: {exp_root(args.version, args.debug, args.tag)}")
     if args.dry_run:
         print("(dry run — no changes will be made)\n")
