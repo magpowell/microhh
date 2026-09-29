@@ -47,6 +47,9 @@ parser.add_argument('--exner-ls', action='store_true',
                     help='Convert the CASS temperature tendency to a theta_l tendency (divide by Exner).')
 parser.add_argument('--taper-wls', action='store_true',
                     help='Let w_ls go linearly to zero from the lowest table level to the surface.')
+parser.add_argument('--land-composite', default=None, metavar='FILE',
+                    help='Soil state and root fractions from this file (cass_land_composite.py) '
+                         'instead of the soil group of cass_ls2d_input.nc.')
 args = parser.parse_args()
 
 if args.wind_u is not None and args.zero_winds:
@@ -440,7 +443,10 @@ for name in aerosol_names:
 
 
 # land surface model: composite-mean soil from cass_ls2d_input.nc
-ls2d_soil = xr.open_dataset('cass_ls2d_input.nc', group = 'soil')
+if args.land_composite:
+    ls2d_soil = xr.open_dataset(args.land_composite)
+else:
+    ls2d_soil = xr.open_dataset('cass_ls2d_input.nc', group = 'soil')
 nc_soil = nc_file.createGroup('soil')
 add_nc_dim('z', ls2d_soil.sizes['z'], nc_soil)
 add_nc_var('z', ('z'), nc_soil, ls2d_soil.z.values)

@@ -211,3 +211,44 @@ one day. The smoke test was resubmitted as two 2-GPU H100 jobs (old+new binary s
   applied at the same point as `swhomogenizesfc_sw` in `radiation_rrtmgp_rt.cxx` (and the 2stream solver for
   the 2s-hom analogue); no partial-scaling option exists today, only homogenize (a = 0) and `swscalesfc_to_2str`.
   Same sweep shape as wind_geo_hom: both RT modes, 4 reps, tracer.
+
+## 11. Base case v3 (`no_aerosols_zero_wind_v3`), settled 2026-09-29
+
+Set up by `experiments/no_aerosols_zero_wind/setup_no_aerosols_zero_wind.py --version v3`. Three configurations
+(`2stream`, `raytracer`, `raytracer_swmatch`), 4 members each, the same random seed for the same member number.
+Where the CASS case description (https://portal.nersc.gov/project/capt/CASS/) specifies a value, v3 follows it.
+
+| Item | v2 | v3 | Source |
+|---|---|---|---|
+| Start | 10:30 UTC | 12:00 UTC | CASS tables start at day 205.5 |
+| Domain top, levels | 6.4 km, 256 | 8 km, 320; damping from 6.4 km | v2 cloud tops reached the damping layer by 16 LT in 3D |
+| Temperature tendency | used as theta_l tendency | divided by the Exner function | table column is a temperature tendency |
+| Subsidence below the lowest table level (205 m) | constant | linear to zero at the surface | w = 0 at the surface |
+| Nudging | u, v at all heights on 3 h | theta_l, q_t above 5 km on 1 h (zero below 4.5 km) toward the CASS sounding | CASS; winds are zero in this case |
+| Momentum roughness z0m | 0.075 m | 0.035 m | CASS |
+| Heat roughness z0h | 0.003 m | 0.003 m | choice, see below |
+| Soil moisture and temperature | ERA5 composite at 10 UTC | ERA5 composite at 12 UTC | start hour |
+| Vegetation cover c_veg | 1.0 | 0.898 | ERA5 low-vegetation cover 0.998 x IFS density 0.90 |
+| Leaf area index | 1.5 | 1.47 | ERA5, mean over the case days |
+| Minimum canopy resistance | 70 s/m | 100 s/m | IFS table, crops and mixed farming |
+| Vapour-pressure-deficit coefficient gD | 0 | 0 | IFS table: 0 for all low vegetation |
+| Root distribution | short grass | crops and mixed farming | IFS table for the ERA5 vegetation type |
+
+**Land surface.** `shared/preprocessing/cass_land_composite.py` takes ERA5 at the grid point of the site (36.5 N,
+97.5 W) over the 119 case days: soil type 2 (medium), low vegetation type 1 (crops, mixed farming), low-vegetation
+cover 0.998, high-vegetation cover 0.002 (ignored), leaf area index 1.47. Canopy parameters are those of that
+vegetation type in Table 8.1 of the IFS documentation Cy41r2 (the ERA5 cycle), Part IV. The script reproduces the
+v2 soil composite at 10 UTC exactly; moving to 12 UTC leaves soil moisture unchanged (within 0.0002) and cools the
+two upper soil layers by 0.2 and 0.4 K. Initial soil moisture is about halfway between wilting point (0.151) and
+field capacity (0.346). The vegetation values are not tuned: the resulting surface partition is accepted as it is.
+The ERA5 files are small and are kept in `$SCRATCH/CASS_LES/shared_data/era5_land/`; the per-day LS2D cache of
+2026-02 was purged from scratch.
+
+**Heat roughness, a choice.** CASS gives one roughness length (0.035 m) and used prescribed surface fluxes, for
+which the heat roughness has no effect on the fluxes. v3 keeps z0h = 0.003 m as in v2, so z0m / z0h = 11.7. For
+reference, the IFS table uses z0m / z0h = 100 for low vegetation (crops: 0.25 and 0.0025 m).
+
+**Output.** Second dump stream (`[dump] swhf`): u, v, w, thl, qt, p as float32 below 6 km from 23700 s to 38400 s
+(11:58 to 16:03 local solar time), every 60 s for member 1 of `2stream` and `raytracer`, every 300 s otherwise.
+Hourly full fields include p, ql and b. Statistics add the `qlcore` mask, per-process tendencies
+(`swtendency`) and warm-rain process rates.
