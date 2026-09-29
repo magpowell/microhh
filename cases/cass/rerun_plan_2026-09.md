@@ -597,3 +597,40 @@ clouds, down to -11 W/m2 at midday, up to +5 W/m2 in the late afternoon; zero in
   (a time series in the statistics), and the heating is not scaled.
 - v3 has cross-sections at two heights: the loaders (`cass_analysis.load_sfc_xy`, `load_xy_files`,
   `characterize/les_io.lowest`) now take the lowest level.
+
+### The shortwave-matched run against the 1D run, from its statistics (four members each, v2 era)
+
+Statistics of `sw_scale` retrieved from tape (`sw_scale.tar`) to `$SCRATCH/CASS_LES/restore/sw_scale/`. Same grid,
+time origin and land surface as v2; no tracer.
+
+| Domain mean, 10 to 17 local solar time | 1D | 3D | 3D matched |
+|---|---|---|---|
+| Surface shortwave the land received [W/m2] | 774.8 | 781.6 | 775.2 |
+| Difference from 1D [W/m2] | | +6.8 | +0.4 |
+| Liquid water path [g/m2] | 7.9 | 11.3 | 10.9 |
+| Cloud cover | 0.138 | 0.140 | 0.140 |
+
+- The matched run received the 1D run's mean shortwave within 0.4 W/m2 over the afternoon; hour by hour within
+  -4.9 to +3.6 W/m2 (3D minus 1D: up to +15.5; spread of the 1D members up to 2.8).
+- It keeps 88 % of the increase of the liquid water path. The result that the domain-mean flux does not explain the
+  increase stands.
+- Its energy balance closes with the scaled ray-traced net radiation (mean 0.47, largest 0.92 W/m2); with the
+  unscaled `_rt` outputs it would show 5.6 and 12.2 W/m2.
+
+### The two radiation code paths differ in clear sky (found 2026-09-29, cause not traced)
+
+v3 small tests, same binary and input, no clouds, same water vapour path and same flux at the domain top:
+
+| UTC | Surface downwelling, two-stream run | Ray tracer run, its two-stream | Ray tracer run, ray-traced |
+|---|---|---|---|
+| 13 | 237.3 | +0.8 | +0.5 |
+| 14 | 441.1 | +1.4 | +1.4 |
+| 15 | 632.6 | +2.1 | +2.4 |
+| 16 | 793.6 | +3.0 | +3.5 |
+
+- The difference is in the direct beam and changes sign with height (16 UTC: -2.8 W/m2 at 6 km, -0.8 at 2 km, +2.9
+  at the surface): the ray tracer path absorbs more aloft and less below, 0.4 % more reaches the surface.
+- It is a difference between `radiation_rrtmgp` and `radiation_rrtmgp_rt` (same settings, same coefficient
+  files), not a 3D effect. About 3 of the 7 W/m2 by which the domain-mean surface shortwave of 3D exceeds 1D
+  around midday may come from it. The matched run is matched to the two-stream of the ray tracer path and carries
+  the same offset (+1.7 to +3.6 W/m2 against the 1D run before and around the first clouds).
