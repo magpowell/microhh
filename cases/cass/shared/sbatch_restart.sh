@@ -12,6 +12,11 @@
 #     parent), and post-processes only when it actually ran. Completion is read
 #     from the last time in cass.out: a run whose endtime is not a multiple of
 #     savetime leaves no restart files at its end.
+#   - Restarts only a run that was stopped from outside. It does NOT restart
+#     when the previous job (PARENT_JOB) ended in any state other than TIMEOUT,
+#     NODE_FAIL or PREEMPTED, when the last lines of cass.out hold numbers that
+#     are not finite, or when a restart file does. A model failure would only
+#     repeat itself.
 #
 # After any restart: pass `-t0 0` to 3d_to_nc.py / cross_to_nc.py to convert
 # the full timeline, not the restart segment. The original ini is kept as
@@ -24,6 +29,8 @@
 #   SIM_DIRS       colon-separated run directories.
 #   RESTART_VARS   space-separated prognostic set that must exist at the
 #                  restart time. Default is the tracer-bearing rerun config.
+#   PARENT_JOB     id of the job whose run is to be continued; its final state
+#                  is read with sacct. Without it only the files are checked.
 
 set -uo pipefail
 
@@ -31,6 +38,14 @@ set -uo pipefail
 : "${SIM_DIRS:?must be exported by the submitting script}"
 export RESTART_VARS="${RESTART_VARS:-thl qt ql w u v couvreux qr nr}"
 source "$MICROHH_DIR/config/site_env.sh"
+
+export XR_PY
+PARENT_STATE=""
+if [[ -n "${PARENT_JOB:-}" ]]; then
+    PARENT_STATE=$(sacct -j "$PARENT_JOB" -X -n -P -o State 2>/dev/null | head -1 | awk '{print $1}')
+    echo "Previous job $PARENT_JOB ended as: ${PARENT_STATE:-unknown}"
+fi
+export PARENT_STATE
 
 IFS=':' read -ra DIRS <<< "$SIM_DIRS"
 echo "Restarting ${#DIRS[@]} CASS simulation(s) at $(date)"
@@ -61,12 +76,28 @@ srun -n ${#DIRS[@]} bash -c '
         exit 0
     fi
 
+    case "${PARENT_STATE:-}" in
+        ""|TIMEOUT|NODE_FAIL|PREEMPTED) ;;
+        *) echo "[GPU $SLURM_LOCALID] Previous job ended as ${PARENT_STATE}, not stopped from outside: no restart"
+           exit 1 ;;
+    esac
+    if tail -n 5 cass.out | grep -qiE "nan|inf"; then
+        echo "[GPU $SLURM_LOCALID] Numbers that are not finite in cass.out: no restart"
+        exit 1
+    fi
+
+    FILES=()
     for v in "${VARS[@]}"; do
         if [[ ! -f "${v}.${last_t}" ]]; then
             echo "[GPU $SLURM_LOCALID] Missing ${v}.${last_t} in $dir, aborting"
             exit 1
         fi
+        FILES+=("${v}.${last_t}")
     done
+    if ! "$XR_PY" "$MICROHH_DIR/cases/cass/shared/check_finite.py" "${FILES[@]}"; then
+        echo "[GPU $SLURM_LOCALID] Restart files at ${last_t} are not finite: no restart"
+        exit 1
+    fi
 
     if [[ ! -f "cass.ini.before_restart" ]]; then
         cp cass.ini "cass.ini.before_restart"

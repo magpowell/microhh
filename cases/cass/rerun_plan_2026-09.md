@@ -401,6 +401,9 @@ Further tests of the fixed binary:
   received 0.8 % more than the table. With `--flux-model-density` (used for run 4) it receives the table values.
 - Not changed, and small: the surface flux has no Exner factor while radiation has one (0.9 % of H); the land
   model linearises its own longwave emission (residual below 2 W/m2).
+- The fix makes the coupling conserve energy and water; it does not make the density exact. The anelastic model
+  carries one reference density (1.148 kg/m3 at the surface), about 4 % above that of the air at the first level
+  at midday (1.109). For the methods: one clause saying so is enough (user, 2026-09-29).
 
 ## 15. Runs 3 and 4: winds (2026-09-29)
 
@@ -445,6 +448,11 @@ iteration with a statistics sample minus the 18.7 s of one without):
 - The statistics kernels carry OpenMP directives over the levels, but the Perlmutter build does not enable OpenMP,
   so the 32 CPU cores of a job are idle during the statistics. A build with OpenMP is untested here; it is the
   lever for the later sweeps.
+- BEFORE ANY BUILD WITH OPENMP: `Dump::do_dump` stores two flags (`do_regular`, `do_hf`, `src/dump.cxx`) that
+  `needs` and `save_dump` read later. With OpenMP the statistics and dumps run as a task on a second thread while
+  the main thread calls `do_dump` again, so the flags can be reset while a dump is being written and the remaining
+  variables are skipped without a message, in the regular stream as well. Fix (pass the two decisions to the
+  writer instead of storing them) and test bit-identity first. Not done during production: no rebuild now.
 
 Wall time projection for v3 (v2 shares scaled by the levels, measured radiation and statistics costs): two-stream
 about 16 h (limit 20 h), ray tracer about 33 h (limit 48 h). One ray tracer step costs 116 s at sunrise (v2 at the
@@ -496,3 +504,31 @@ and in the build files. The radiation submodule is at the commit upstream pins (
   `rs_veg_min` and `rs_soil_min` in the case input; soil moisture nudging reads its target only for homogeneous
   surfaces but applies it regardless; the edit of `src/CMakeLists.txt` (cuFFT and cuRAND removed from the link line)
   belongs in the machine file.
+
+## 19. Decisions of 2026-09-29 on the model changes, and the production tag
+
+- Conditional masks: all four kept; pairing of 1D and 3D matters more than 4.6 h per run.
+- `thv_diff`, `thv_flux` last-bit differences: accepted (order of a floating-point sum, not the physics).
+- `rs_scale`: to be moved out of the model into the case input (scale `rs_veg_min` and `rs_soil_min`), which removes
+  one change from the branch and makes the Bowen ratio sweep reproducible with upstream MicroHH. Not urgent: do it
+  when the land-surface setup is next touched, and test once that scaled input values give the same result as the
+  switch (so far from reading the code only).
+- `swqsqg_to_rad` (snow and graupel passed to the radiation as ice, GoAmazon and ARM97SD): not used in CASS, left
+  alone.
+- Dump stream flags: see section 16.
+- Restart chain and model failures: MicroHH stops itself when the CFL number is not finite or above 10 (checked
+  every `outputiter` iterations), and the job then ends as FAILED. `sbatch_restart.sh` restarts only when the
+  previous job (`PARENT_JOB`) ended as TIMEOUT, NODE_FAIL or PREEMPTED, when the last lines of `cass.out` are
+  finite and when the restart files are finite (`shared/check_finite.py`). A run job cancelled by hand is not
+  restarted either. `test_sbatch_restart.sh`: 19 checks.
+- Production tag: `v3-production` marks the commit whose case scripts write the inis and inputs of runs 1 to 4 and
+  whose source is that of the production binaries. Binaries (read-only, `~/validated_builds/`; on tape in
+  `/home/m/mpowell/CASS_LES/shared_data/binaries_v3_2026-09-29.tar`):
+
+| Binary | Source commit | sha256 | Runs |
+|---|---|---|---|
+| `microhh_2.0.2-51-gc40a8615c` | c40a8615c | 3ad7c98bdb9177d6ff73ca52128f22b84735a0b3984dff2ee1e1fc31e548cbdc | 1 and 2 |
+| `microhh_2.0.2-53-g8dfd95410` | 8dfd95410 | bfb41391303fd7389dd2369b70cbc5b678300ae48face8db4b470b5375504695 | 3 and 4 |
+
+  The two sources differ by the nudging factor per variable, which leaves runs without `nudgefac_<variable>`
+  unchanged (section 14, further tests). The source has not changed since 8dfd95410.
