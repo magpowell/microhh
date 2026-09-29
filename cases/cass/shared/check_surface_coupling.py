@@ -1,5 +1,9 @@
 """Check that the atmosphere receives the fluxes of the land surface model and that the surface energy balance closes.
 
+Net radiation is the one the land surface model receives. In a ray tracer run that is the ray-traced surface
+shortwave (time series sw_flux_sfc_dir_rt, sw_flux_sfc_dif_rt, sw_flux_sfc_up_rt); the profiles sw_flux_dn and
+sw_flux_up of such a run are the two-stream fluxes the model computes alongside and are not used by the land model.
+
 python check_surface_coupling.py --run <run dir> [--ref <run dir to compare with>] [--segment N]
 python check_surface_coupling.py --run <run dir with prescribed fluxes> --prescribed
 Exit status 1 when the atmosphere does not receive the fluxes of the land surface model (tolerance TOL).
@@ -39,7 +43,15 @@ def coupling(run, segment=0):
     d["rho_thermo"] = th["rhoh"].isel(zh=0)
     d["H_atm"] = rho_dyn * CP * th["thl_flux"].isel(zh=0)
     d["LE_atm"] = rho_dyn * LV * th["qt_flux"].isel(zh=0)
-    d["Qnet"] = rad["sw_flux_dn"] - rad["sw_flux_up"] + rad["lw_flux_dn"] - rad["lw_flux_up"]
+    lw = rad["lw_flux_dn"] - rad["lw_flux_up"]
+    d["Qnet_2s"] = rad["sw_flux_dn"] - rad["sw_flux_up"] + lw
+    if "sw_flux_sfc_dir_rt" in rad:
+        d["Qnet"] = rad["sw_flux_sfc_dir_rt"] + rad["sw_flux_sfc_dif_rt"] - rad["sw_flux_sfc_up_rt"] + lw
+        d.attrs["shortwave"] = "ray-traced"
+    else:
+        d["Qnet"] = d["Qnet_2s"]
+        d.attrs["shortwave"] = "two-stream"
+    d["res_2s"] = d["Qnet_2s"] - (d["H"] + d["LE"] + d["G"] + d["S"])
     d["res_land"] = d["Qnet"] - (d["H"] + d["LE"] + d["G"] + d["S"])
     d["res_atm"] = d["Qnet"] - d["G"] - d["S"] - (d["H_atm"] + d["LE_atm"])
     d["bowen"] = d["H"] / d["LE"]
@@ -96,7 +108,8 @@ def report(run, ref=None, segment=0):
     day = d.isel(time=np.flatnonzero((d["H"] + d["LE"] > 50.).values))
     hours = [h for h in range(13, 26) if (h - UTC0) * 3600. in d["time"].values]
     pd.set_option("display.width", 200)
-    print(f"\n{run}\ndensity of the dynamics at the surface: {d.attrs['rho_dyn']:.4f} kg m-3")
+    print(f"\n{run}\ndensity of the dynamics at the surface: {d.attrs['rho_dyn']:.4f} kg m-3; "
+          f"net radiation of the land model: {d.attrs['shortwave']} shortwave")
     if hours:
         t = hourly(d, hours)
         t["H_atm/H"], t["LE_atm/LE"] = t["H_atm"] / t["H"], t["LE_atm"] / t["LE"]
@@ -106,7 +119,7 @@ def report(run, ref=None, segment=0):
         for v, w in (("H", "H_atm"), ("LE", "LE_atm")):
             r = day[w] / day[v] - 1.
             print(f"{w}/{v} - 1 while H + LE > 50 W m-2: max abs {float(abs(r).max()):.3e}  (n = {r.size})")
-        for v in ("res_land", "res_atm"):
+        for v in ("res_land", "res_atm") + (("res_2s",) if d.attrs["shortwave"] == "ray-traced" else ()):
             print(f"{v} while H + LE > 50 W m-2: mean {float(day[v].mean()):.3f}, max abs {float(abs(day[v]).max()):.3f} W m-2")
     ex = (d["H_atm"] + d["LE_atm"] - d["H"] - d["LE"]).integrate("time")
     ew = ((d["LE_atm"] - d["LE"]) / LV).integrate("time")

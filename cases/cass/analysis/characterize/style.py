@@ -11,6 +11,9 @@ plt.rcParams.update({"font.size": 9, "axes.titlesize": 10, "axes.labelsize": 9, 
 
 RT = {"1D": dict(color="C0"), "3D": dict(color="C1")}
 ENV = dict(color="k")
+RESIDUAL = dict(color="k", lw=2.0)
+SW_PARTS = {"net": dict(color="C3", ls="-"), "downwelling": dict(color="C4", ls="--"), "direct": dict(color="C2", ls=":"),
+            "diffuse": dict(color="C5", ls="-."), "upwelling": dict(color="C6", ls=(0, (5, 1)))}
 WRITE_PDF = False
 
 

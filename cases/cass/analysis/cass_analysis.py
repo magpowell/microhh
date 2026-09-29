@@ -303,6 +303,12 @@ def _load_stats_segment(stats_path: Path, run_dir: Path) -> xr.Dataset:
     sw_up = ds_rad["sw_flux_up"].isel(zh=0).values
     lw_dn = ds_rad["lw_flux_dn"].isel(zh=0).values
     lw_up = ds_rad["lw_flux_up"].isel(zh=0).values
+    # Ray tracer runs: sw_flux_dn/up are the two-stream fluxes; the land model receives the ray-traced ones.
+    if "sw_flux_sfc_dir_rt" in ds_rad:
+        sw_dn_sfc = (ds_rad["sw_flux_sfc_dir_rt"] + ds_rad["sw_flux_sfc_dif_rt"]).values
+        sw_up_sfc = ds_rad["sw_flux_sfc_up_rt"].values
+    else:
+        sw_dn_sfc, sw_up_sfc = sw_dn, sw_up
 
     out = xr.Dataset(
         data_vars={
@@ -312,9 +318,11 @@ def _load_stats_segment(stats_path: Path, run_dir: Path) -> xr.Dataset:
             "S":       ("time", ds_lsm["S"].values),
             "theta":   (("time", "z_soil"), ds_lsm["theta"].values),
             "ustar":   ("time", ds_lsm["ustar"].values),
-            "Rnet":      ("time", (sw_dn - sw_up) + (lw_dn - lw_up)),
+            "Rnet":      ("time", (sw_dn_sfc - sw_up_sfc) + (lw_dn - lw_up)),
             "sw_dn":     ("time", sw_dn),
             "sw_up":     ("time", sw_up),
+            "sw_dn_sfc": ("time", sw_dn_sfc),
+            "sw_up_sfc": ("time", sw_up_sfc),
             "lw_dn":     ("time", lw_dn),
             "lw_up":     ("time", lw_up),
             "sza":       ("time", ds_rad["sza"].values),
@@ -386,7 +394,9 @@ def load_stats(run_dir, mask: str = "default") -> xr.Dataset:
 
     Key variables
     -------------
-    H, LE, G, S, Rnet                 SEB scalars (W m-2)
+    H, LE, G, S, Rnet                 SEB scalars (W m-2); Rnet is what the land model receives
+    sw_dn_sfc, sw_up_sfc              surface shortwave the land model receives (ray-traced in 3D runs)
+    sw_dn, sw_up                      two-stream surface shortwave (in 3D runs NOT what the surface receives)
     theta                             soil moisture (time, z_soil)
     qlqi_path, qlqi_cover, ql_cover   cloud scalars
     zi                                boundary-layer height (m)
