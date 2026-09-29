@@ -617,7 +617,7 @@ time origin and land surface as v2; no tracer.
 - Its energy balance closes with the scaled ray-traced net radiation (mean 0.47, largest 0.92 W/m2); with the
   unscaled `_rt` outputs it would show 5.6 and 12.2 W/m2.
 
-### The two radiation code paths differ in clear sky (found 2026-09-29, cause not traced)
+### The two radiation code paths differ in clear sky (found and traced 2026-09-29)
 
 v3 small tests, same binary and input, no clouds, same water vapour path and same flux at the domain top:
 
@@ -642,7 +642,7 @@ difference between the radiation code paths rather than from 3D effects." The ma
 unaffected, since the matching absorbed the offset. Runs 1 and 2 use the two code paths, so the offset is inside
 every 3D minus 1D domain-mean shortwave number of the production runs.
 
-### Trace of the clear-sky difference (in progress, 2026-09-29)
+### Trace of the clear-sky difference (2026-09-29)
 
 - Radiation library: the binary is built from the submodule `rte-rrtmgp-cpp` inside the MicroHH repository
   (`CMakeLists.txt` l.155-167, `main/CMakeLists.txt` l.48), commit 416a6706 of 2024-02-20, the commit upstream
@@ -654,10 +654,53 @@ every 3D minus 1D domain-mean shortwave number of the production runs.
   W/m2); the optical depth of the direct beam per layer in the ray tracer path is 11 to 15 % larger at 8 km, equal
   near 3.5 km and 6 to 10 % smaller at the surface than in the two-stream path, at every height of the sun; the
   column total is 1 to 1.6 % smaller; the longwave agrees to 0.04 W/m2.
-- Ruled out by reading: the inputs MicroHH passes (pressure, temperature, water vapour, gas columns:
-  `src/radiation_rrtmgp.cu` l.920-935, `src/radiation_rrtmgp_rt.cu` l.1624-1642), the background column and the
+- Ruled out by reading: pressure, temperature and dry air columns passed by MicroHH (`src/radiation_rrtmgp.cu`
+  l.920-935, `src/radiation_rrtmgp_rt.cu` l.1624-1642; the first reading took the water vapour for the same in
+  both because both set it at the same place, and missed which object is passed on), the background column and the
   flux per spectral point at the domain top (`solve_shortwave_column` is the same code in both), the radiation
   settings, and the kernels for interpolation, major gases, minor gases, Rayleigh scattering and gas columns,
   which are the same mathematics in both copies.
-- Running: the standalone programs of the pinned library on one column taken from the model (`$SCRATCH/CASS_LES/
-  debug/rte_codepath_test/`), with the optical depth per spectral point from both copies.
+- Standalone programs of the pinned library on one column of the model (`$SCRATCH/CASS_LES/debug/
+  rte_codepath_test/run`, job 59090947): the two copies give the same fluxes (0.0000 W/m2) and the same optical
+  depth per spectral point (ratio 1.000000). The library is not the cause.
+
+### Cause: ray tracer runs give the shortwave gas optics the water vapour of the input file (upstream MicroHH)
+
+- `Radiation_rrtmgp_rt::exec_shortwave_rt` writes the current water vapour to the device object
+  (`src/radiation_rrtmgp_rt.cu` l.1635, `gas_concs_gpu->set_vmr("h2o", h2o)`) and computes the dry air column from
+  it (l.1643), but hands the gas optics `gas_concs` (l.1724). That name is the host member
+  (`include/radiation_rrtmgp_rt.h` l.305), filled once from group `init` of the input file
+  (`src/radiation_rrtmgp_rt.cxx` l.1218-1219) and converted to a device object without a message
+  (`rte-rrtmgp-cpp/include/Gas_concs.h` l.77). The library applies a profile with one column to all columns
+  (`rte-rrtmgp-cpp/src_cuda_rt/Gas_optics_rrtmgp_rt.cu` l.864-898, l.1138-1140).
+- So in ray tracer runs the shortwave (its two-stream and the ray tracer, which share the optical properties) uses
+  the `h2o` profile of the input file, the same in every column and at every time. The longwave of ray tracer runs
+  and everything in two-stream runs use the water vapour of the model (`gas_concs_gpu`, l.1167, l.1203).
+- It came with upstream commit 6599ea277 (2024-01-31, "bring radiation up-to-date with new interface of ray
+  tracer"), which replaced `Gas_concs_gpu gas_concs_subset(*gas_concs_gpu, col_s, n_col_subset)` by `gas_concs`.
+  Upstream `main` (736a2f5ef) and `develop` (fd3414284) have the same line (l.1710 there). Nothing was sent upstream.
+- In the CASS input `h2o` is the ERA5 profile (`shared/cass_input.py` l.428-430), the model starts from the CASS
+  sounding. Input `h2o` over water vapour of the model, 13 to 16 UTC: 0.83 to 0.87 at the surface, 0.90 at 1 km,
+  0.98 to 1.00 at 2 to 3.5 km, 1.27 to 1.32 at 6 to 8 km; column 0.95 to 0.97.
+- Check (`rte_codepath_test/run_h2o`, job 59091317): standalone library on the column of the two-stream run at
+  16 UTC with the atmosphere above, once with the water vapour of the model and once with the input profile (dry
+  air column of the model in both). Standalone numbers times the sun distance factor of the run (0.968):
+
+| Height | Direct beam, ray tracer run minus two-stream run | Standalone, input minus model water vapour | Optical depth ratio per layer, runs | Standalone |
+|---|---|---|---|---|
+| 8 km | +0.00 | +0.00 | 1.1452 | 1.1452 |
+| 6 km | -2.78 | -2.78 | 1.0885 | 1.0885 |
+| 4 km | -2.01 | -2.02 | 1.0236 | 1.0236 |
+| 2 km | -0.82 | -0.83 | 0.9900 | 0.9900 |
+| 1 km | +0.19 | +0.19 | 0.9281 | 0.9280 |
+| surface | +2.90 | +2.90 | 0.8977 | 0.8977 |
+
+  The offset is reproduced (fluxes within 0.01 W/m2, optical depth ratios to four digits). Absorbed shortwave at 16 UTC with the input profile: -3.1 W/m2 (-8.9 %)
+  below 1 km, -0.9 between 1 and 2 km, -1.1 between 2 and 4 km, +2.1 (+4.1 %) between 4 and 8 km; net at the
+  surface +2.3 W/m2.
+- Reach: every ray tracer run of MicroHH since the commit (CASS up to v2, the small v3 tests, GoAmazon, ARM97SD),
+  with a size set by the `h2o` of each input. 3D_RT_DPSCREAM is not affected: all its legs come from one program
+  and one input file (`scripts/rt/run_raytracer_all.sh` l.49, l.123-153).
+- Correction would be one line (`*gas_concs_gpu` at l.1724). NOT applied: the trace was read-only and the four 3D
+  production jobs are queued with the binary that has the error. Decision of the user pending; the tag
+  `v3-production` waits for it.
