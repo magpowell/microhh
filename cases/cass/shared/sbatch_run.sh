@@ -17,7 +17,8 @@
 #                 site from a compute node's hostname on every cluster).
 #   SIM_DIRS      colon-separated run directories, one per task. With the
 #                 recommended 1-GPU-per-job submission this is a single dir.
-#   GPU_MEM_LOG=1 additionally logs nvidia-smi memory every 10 s.
+#   GPU_MEM_LOG=1 additionally logs nvidia-smi memory (gpu_mem.log) and the
+#                 resident host memory of the model (host_mem.log) every 10 s.
 #
 # Post-processing (cross_to_nc.py on the xy crosses) runs inside the job under
 # $XR_PY from the site layer.
@@ -57,7 +58,17 @@ srun -n ${#DIRS[@]} bash -c '
     rm -f *.[0-9][0-9][0-9][0-9][0-9][0-9][0-9]
     rm -f *.xy.* *_kernel.txt
     ./microhh init cass
-    ./microhh run cass
+    if [[ "${GPU_MEM_LOG:-0}" == "1" ]]; then
+        ./microhh run cass &
+        RUNPID=$!
+        ( while kill -0 $RUNPID 2>/dev/null; do
+              echo "$(date +%T) $(grep -E "VmHWM|VmRSS|RssAnon|RssFile" /proc/$RUNPID/status | tr -s "\t\n " " ")"
+              sleep 10
+          done > host_mem.log ) &
+        wait $RUNPID
+    else
+        ./microhh run cass
+    fi
     status=$?
     [[ -n "${MEMPID:-}" ]] && kill $MEMPID 2>/dev/null
     echo "[GPU $SLURM_LOCALID] Done (exit $status) at $(date)"
