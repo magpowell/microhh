@@ -208,6 +208,229 @@ def figure7(expt, vlim=3.e-3):
 TIMES4 = (28800, 32400, 36000, 39600)
 
 
+def _members(ax, x, m, lab):
+    ax.fill_between(x, np.nanmin(m, axis=0), np.nanmax(m, axis=0), alpha=0.25, lw=0, **st.RT[lab])
+    return ax.plot(x, np.nanmean(m, axis=0), lw=1.8, label=lab, **st.RT[lab])[0]
+
+
+def figure8(expt, tag="", zlim=(1.0, 3.5), qlim=0.5):
+    """Timing: cloud depth in 1D and 3D, and 3D minus 1D moisture outside cloud with cloud fraction contours."""
+    res = st.outdir(expt).parent
+    with xr.open_dataset(res / f"timing{tag}.nc") as d:
+        d = d.load()
+    x, z = d["lst"].values, d["z"].values / 1e3
+    fig, axs = plt.subplots(3, 1, figsize=(6.5, 8.), sharex=True, constrained_layout=True,
+                            gridspec_kw=dict(height_ratios=[1., 1., 1.5]))
+    h = [_members(axs[0], x, d["lwp_members"].values[i] * 1e3, lab) for i, (_, lab) in enumerate(RTS)]
+    axs[0].set_ylabel(r"liquid water path [g m$^{-2}$]")
+    for i, (_, lab) in enumerate(RTS):
+        _members(axs[1], x, d["depth_active_members"].values[i], lab)
+    axs[1].set_ylabel("depth of clouds with\na buoyant column [m]")
+    pc = axs[2].pcolormesh(x, z, d["qt_out_diff"].values.T * 1e3, cmap="BrBG", vmin=-qlim, vmax=qlim, shading="nearest",
+                           rasterized=True)
+    cs = axs[2].contour(x, z, d["cf_diff"].values.T * 100., levels=[0.2, 0.5, 0.8], colors="k", linewidths=0.8)
+    axs[2].clabel(cs, fmt="%.1f", fontsize=7)
+    axs[2].set_ylim(*zlim)
+    axs[2].set_ylabel("height [km]")
+    axs[2].set_xlabel("local solar time [h]")
+    fig.colorbar(pc, ax=axs[2], label=r"3D - 1D water vapour outside cloud [g kg$^{-1}$]", extend="both", pad=0.02)
+    for k, ax in enumerate(axs):
+        st.apply(ax)
+        st.panel(ax, k)
+    axs[0].set_xlim(9., 16.)
+    h.append(plt.Line2D([], [], color="k", lw=0.8, label="3D - 1D cloud fraction [%]"))
+    fig.legend(handles=h, ncols=3, loc="outside lower center")
+    return st.savefig(fig, expt, f"fig8_timing{tag}")
+
+
+def figure9(expt, tag="", window=(12., 15.)):
+    """Lifetimes of clouds that never merge or split, and the share of such clouds against track length."""
+    import lifetime as lf
+    L = np.arange(1., 26.)
+    fig, axs = plt.subplots(1, 2, figsize=(7., 3.4), constrained_layout=True)
+    h = []
+    for rt, lab in RTS:
+        surv, share = [], []
+        for rep in range(1, 5):
+            t = lf.load(expt, rt, rep, tag)
+            t = t[(t.lst_first >= window[0]) & (t.lst_first < window[1])]
+            u = t[t.untouched].length.values
+            surv.append([(u >= v).mean() for v in L])
+            b = np.digitize(t.length.values, lf.LENGTH_BINS) - 1
+            share.append([t.untouched.values[b == i].mean() if (b == i).any() else np.nan
+                          for i in range(lf.LENGTH_BINS.size - 1)])
+        h.append(_members(axs[0], L, np.array(surv), lab))
+        share = np.array(share)
+        xb = np.arange(share.shape[1])
+        axs[1].fill_between(xb, np.nanmin(share, axis=0), np.nanmax(share, axis=0), alpha=0.25, lw=0, **st.RT[lab])
+        axs[1].plot(xb, np.nanmean(share, axis=0), lw=1.8, marker="o", ms=4, **st.RT[lab])
+    axs[0].set_yscale("log")
+    axs[0].set_ylim(1.e-3, 1.)
+    axs[0].set_xlabel("lifetime [min]")
+    axs[0].set_ylabel("share of clouds living\nat least this long [-]")
+    axs[1].set_xticks(np.arange(6), ["1-5", "5-10", "10-20", "20-40", "40-80", "80+"])
+    axs[1].set_xlabel("track length [min]")
+    axs[1].set_ylabel("share of tracks that\nnever merged or split [-]")
+    for k, ax in enumerate(axs):
+        st.apply(ax)
+        st.panel(ax, k)
+    fig.legend(handles=h, ncols=2, loc="outside lower center")
+    return st.savefig(fig, expt, f"fig9_lifetime{tag}")
+
+
+def figure10(expt, times=(36000, 39600), x="w_core_layer", xmax=7.):
+    """Cloud depth against core updraft speed at cloud base, one point per cloud."""
+    import depth_w as dw
+    d = dw.load(expt, x)
+    g, _ = dw.binned(d)
+    fig, axs = plt.subplots(1, len(times), figsize=(4.2 * len(times), 3.8), sharey=True, constrained_layout=True)
+    h = []
+    for k, t in enumerate(times):
+        ax = axs[k]
+        for rt, lab in RTS:
+            c = d[(d.t == t) & (d.rt == rt)]
+            ax.scatter(c.w, c.depth, s=5, alpha=0.2, lw=0, rasterized=True, **st.RT[lab])
+            b = g[(g.t == t) & (g.rt == rt)]
+            m = b.pivot(index="rep", columns="wb", values="depth")
+            xw = b.groupby("wb").w.mean().reindex(m.columns).values
+            ax.fill_between(xw, np.nanmin(m.values, axis=0), np.nanmax(m.values, axis=0), alpha=0.3, lw=0, **st.RT[lab])
+            l, = ax.plot(xw, np.nanmean(m.values, axis=0), lw=1.8, marker="o", ms=4, label=lab, **st.RT[lab])
+            if k == 0:
+                h.append(l)
+        ax.set_xlim(0., xmax)
+        ax.set_xlabel(r"core updraft speed at cloud base [m s$^{-1}$]")
+        st.apply(ax)
+        st.panel(ax, k, st.lt(float(d[d.t == t].lst.iloc[0])))
+    axs[0].set_ylabel("cloud depth [m]")
+    fig.legend(handles=h, ncols=2, loc="outside lower center")
+    return st.savefig(fig, expt, "fig10_depth_speed" + ("" if x == "w_core_layer" else f"_{x}"))
+
+
+def _window(a, j0, i0, h):
+    return a[np.ix_(np.arange(j0 - h, j0 + h + 1) % a.shape[0], np.arange(i0 - h, i0 + h + 1) % a.shape[1])]
+
+
+def figure11(expt, rt="raytracer", rep=1, t=36000, n=3, half=40):
+    """Examples of objects before and after splitting: water path with the object outline and the seeds, then sub-clouds."""
+    res = st.outdir(expt).parent
+    with xr.open_dataset(res / rt / f"rep_{rep:02d}" / f"objects_{t:07d}.nc") as ds:
+        ds = ds.load()
+    dx = ds.attrs["dx"]
+    order = np.argsort(ds["obj_n_seeds"].values + 1.e-6 * ds["obj_D"].values)[::-1]
+    pick = [c for c in order if ds["obj_D"].values[c] < 2. * half * dx * 0.8][:n]
+    fig, axs = plt.subplots(2, n, figsize=(3.2 * n, 6.2), constrained_layout=True, sharex=True, sharey=True)
+    ext = np.array([-half, half, -half, half]) * dx / 1e3
+    for k, c in enumerate(pick):
+        j0, i0 = int(ds["obj_y"].values[c] / dx), int(ds["obj_x"].values[c] / dx)
+        obj = _window(ds["map_obj"].values, j0, i0, half) == c + 1
+        lwp = np.where(obj, _window(ds["map_lwp"].values, j0, i0, half) * 1e3, np.nan)
+        seed = np.where(obj, _window(ds["map_seed"].values, j0, i0, half), 0)
+        sub = np.where(obj, _window(ds["map_sub"].values, j0, i0, half), 0)
+        pc = axs[0, k].imshow(lwp, origin="lower", extent=ext, cmap="Greys", vmin=0., vmax=np.nanpercentile(lwp, 99))
+        axs[0, k].contour(np.linspace(ext[0], ext[1], obj.shape[1]), np.linspace(ext[2], ext[3], obj.shape[0]), seed > 0,
+                          levels=[0.5], colors="C3", linewidths=0.9)
+        ids = np.unique(sub[sub > 0])
+        lab = np.full(sub.shape, np.nan)
+        for m, i in enumerate(ids):
+            lab[sub == i] = m
+        axs[1, k].imshow(lab, origin="lower", extent=ext, cmap="tab10", vmin=-0.5, vmax=9.5, interpolation="nearest")
+        fig.colorbar(pc, ax=axs[0, k], location="top", label=r"liquid water path [g m$^{-2}$]", shrink=0.9)
+        for r in (0, 1):
+            st.apply(axs[r, k])
+            st.panel(axs[r, k], r * n + k)
+            axs[r, k].set_aspect("equal")
+        axs[1, k].set_xlabel("x [km]")
+    axs[0, 0].set_ylabel("y [km]")
+    axs[1, 0].set_ylabel("y [km]")
+    fig.legend(handles=[plt.Line2D([], [], color="C3", lw=0.9, label="core regions used as seeds")], loc="outside lower center")
+    return st.savefig(fig, expt, "fig11_split_examples")
+
+
+def figure12(expt, times=(36000, 39600)):
+    """Share of objects holding two or more cores, against object width."""
+    import robust as rb
+    o = rb.load(expt, "obj")
+    o["wc"] = np.digitize(o.D, rb.WIDTH_CLASSES) - 1
+    fig, axs = plt.subplots(1, len(times), figsize=(3.8 * len(times), 3.4), sharey=True, constrained_layout=True)
+    h = []
+    for k, t in enumerate(times):
+        for rt, lab in RTS:
+            g = o[(o.t == t) & (o.rt == rt)].groupby(["rep", "wc"]).n_seeds.apply(lambda v: (v >= 2).mean()).unstack("wc")
+            g = g.reindex(columns=range(4))
+            h.append(_members(axs[k], np.arange(4), g.values, lab))
+        axs[k].set_xticks(np.arange(4), ["< 0.5", "0.5-1", "1-1.5", "1.5-2"])
+        axs[k].set_xlabel("object width [km]")
+        st.apply(axs[k])
+        st.panel(axs[k], k, st.lt(float(o[o.t == t].lst.iloc[0])))
+    axs[0].set_ylabel("share of objects with\ntwo or more cores [-]")
+    fig.legend(handles=h[:2], ncols=2, loc="outside lower center")
+    return st.savefig(fig, expt, "fig12_cores_per_object")
+
+
+def figure13(expt):
+    """Organization index of cloud objects and of split sub-clouds, with the two references."""
+    import pandas as pd
+    d = pd.read_csv(st.outdir(expt).parent / "cluster_long.csv")
+    cases = [("obj", 0.), ("sub", 0.), ("obj", 500.), ("sub", 500.)]
+    names = ["objects", "sub-clouds", "objects wider than 500 m", "sub-clouds wider than 500 m"]
+    fig, axs = plt.subplots(1, 4, figsize=(11., 3.2), sharey=True, constrained_layout=True)
+    h = []
+    for k, (kind, dmin) in enumerate(cases):
+        c = d[(d.kind == kind) & (d.min_D == dmin)]
+        x = np.sort(c.lst.unique())
+        for rt, lab in RTS:
+            h.append(_members(axs[k], x, c[c.rt == rt].pivot(index="rep", columns="t", values="iorg").values, lab))
+        l1, = axs[k].plot(x, c.groupby("t").iorg_disks.mean().values, color="k", lw=1., ls="--", label="randomly placed disks")
+        l2 = axs[k].axhline(0.5, color="0.6", lw=1., ls=":", label="random points")
+        axs[k].set_xlabel("local solar time [h]")
+        st.apply(axs[k])
+        st.panel(axs[k], k, names[k])
+    axs[0].set_ylabel("organization index [-]")
+    fig.legend(handles=h[:2] + [l1, l2], ncols=4, loc="outside lower center")
+    return st.savefig(fig, expt, "fig13_organization")
+
+
+def figure14(expt, times=(36000, 39600)):
+    """Around large clouds, +x away from the sun: surface shortwave, low-level convergence, small-cloud occurrence."""
+    import neighbours as nb
+    res = st.outdir(expt).parent
+    fig, axs = plt.subplots(3, 2 * len(times), figsize=(3.1 * 2 * len(times), 8.4), constrained_layout=True)
+    h, k = [], 0
+    for c, (t, (rt, lab)) in enumerate([(t, r) for t in times for r in RTS]):
+        M = [xr.open_dataset(res / rt / f"rep_{rep:02d}" / f"neighbours_{t:07d}.nc").load() for rep in range(1, 5)]
+        g = M[0]["xg"].values
+        sw = np.mean([m["sw"].values - float(m["sw_domain"]) for m in M], axis=0)
+        cv = np.mean([m["conv"].values for m in M], axis=0) * 1e3
+        p0 = axs[0, c].pcolormesh(g, g, sw, cmap="RdBu_r", vmin=-400., vmax=400., shading="nearest", rasterized=True)
+        p1 = axs[1, c].pcolormesh(g, g, cv, cmap="PuOr_r", vmin=-2.5, vmax=2.5, shading="nearest", rasterized=True)
+        for r in (0, 1):
+            axs[r, c].add_patch(plt.Circle((0., 0.), 0.5, fill=False, color="k", lw=0.8, ls="--"))
+            axs[r, c].set_aspect("equal")
+            axs[r, c].set_xlabel("x / D [-]")
+        xb = M[0]["xb"].values
+        for pop, ls in (("small", "-"),):
+            rel = []
+            for m in M:
+                cor = np.abs(m["yb"].values) <= 0.5
+                rel.append(m[f"hist_{pop}"].values[cor].sum(axis=0) / (float(m[f"density_{pop}"]) * (m["big_D"].values ** 2).sum() * 0.5))
+            _members(axs[2, c], xb, np.array(rel), lab)
+        axs[2, c].axhline(1., color="0.6", lw=0.8, zorder=0)
+        axs[2, c].axvline(M[0].attrs["shadow_offset_m"] / np.mean([float(m["big_D"].mean()) for m in M]), color="k", lw=0.8, ls=":")
+        axs[2, c].set_ylim(0., 2.)
+        axs[2, c].set_xlabel("x / D [-]")
+        for r in range(3):
+            st.apply(axs[r, c])
+            st.panel(axs[r, c], 4 * r + c, f"{lab}, {st.lt(M[0].attrs['lst_solar'])}" if r == 0 else "")
+    for r, lab in ((0, "y / D [-]"), (1, "y / D [-]"), (2, "small clouds relative\nto random placement [-]")):
+        axs[r, 0].set_ylabel(lab)
+    fig.colorbar(p0, ax=axs[0, :], label="surface shortwave minus\n" + r"domain mean [W m$^{-2}$]", extend="both", pad=0.01)
+    fig.colorbar(p1, ax=axs[1, :], label="low-level convergence\n" + r"[10$^{-3}$ s$^{-1}$]", extend="both", pad=0.01)
+    hh = [plt.Line2D([], [], lw=1.8, label=l, **st.RT[l]) for l in ("1D", "3D")]
+    hh += [plt.Line2D([], [], color="k", lw=0.8, ls="--", label="large cloud"), plt.Line2D([], [], color="k", lw=0.8, ls=":", label="shadow offset")]
+    fig.legend(handles=hh, ncols=4, loc="outside lower center")
+    return st.savefig(fig, expt, "fig14_neighbours")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
@@ -219,3 +442,8 @@ if __name__ == "__main__":
     for t in TIMES4:
         print(figure6(a.expt, t))
     print(figure7(a.expt))
+    print(figure8(a.expt))
+    print(figure9(a.expt))
+    print(figure10(a.expt))
+    for fn in (figure11, figure12, figure13, figure14):
+        print(fn(a.expt))
