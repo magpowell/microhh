@@ -15,6 +15,7 @@ CP, LV = 1005., 2.501e6    # include/constants.h
 UTC0 = 12.
 FRAC_MIN = 1.e-3           # cloud base: lowest level with cloud fraction above this
 TOL = 1.e-12               # received over reported flux, minus one (rounding gives about 1e-15)
+TOL_ABS = 1.e-9            # received minus reported flux [W m-2]
 
 
 def load(run, segment=0):
@@ -92,27 +93,31 @@ def hourly(d, hours):
 
 def report(run, ref=None, segment=0):
     d = coupling(run, segment)
-    day = d.where(d["H"] + d["LE"] > 50., drop=True)
+    day = d.isel(time=np.flatnonzero((d["H"] + d["LE"] > 50.).values))
     hours = [h for h in range(13, 26) if (h - UTC0) * 3600. in d["time"].values]
     pd.set_option("display.width", 200)
     print(f"\n{run}\ndensity of the dynamics at the surface: {d.attrs['rho_dyn']:.4f} kg m-3")
-    t = hourly(d, hours)
-    t["H_atm/H"], t["LE_atm/LE"] = t["H_atm"] / t["H"], t["LE_atm"] / t["LE"]
-    print(t[["rho_thermo", "H", "H_atm", "LE", "LE_atm", "H_atm/H", "LE_atm/LE", "bowen", "Qnet", "G", "S",
-             "res_land", "res_atm"]].to_string(float_format=lambda x: f"{x:.4f}"))
-    for v, w in (("H", "H_atm"), ("LE", "LE_atm")):
-        r = day[w] / day[v] - 1.
-        print(f"{w}/{v} - 1 while H + LE > 50 W m-2: max abs {float(abs(r).max()):.3e}  (n = {r.size})")
-    for v in ("res_land", "res_atm"):
-        print(f"{v} while H + LE > 50 W m-2: mean {float(day[v].mean()):.3f}, max abs {float(abs(day[v]).max()):.3f} W m-2")
+    if hours:
+        t = hourly(d, hours)
+        t["H_atm/H"], t["LE_atm/LE"] = t["H_atm"] / t["H"], t["LE_atm"] / t["LE"]
+        print(t[["rho_thermo", "H", "H_atm", "LE", "LE_atm", "H_atm/H", "LE_atm/LE", "bowen", "Qnet", "G", "S",
+                 "res_land", "res_atm"]].to_string(float_format=lambda x: f"{x:.4f}"))
+    if day.sizes["time"]:
+        for v, w in (("H", "H_atm"), ("LE", "LE_atm")):
+            r = day[w] / day[v] - 1.
+            print(f"{w}/{v} - 1 while H + LE > 50 W m-2: max abs {float(abs(r).max()):.3e}  (n = {r.size})")
+        for v in ("res_land", "res_atm"):
+            print(f"{v} while H + LE > 50 W m-2: mean {float(day[v].mean()):.3f}, max abs {float(abs(day[v]).max()):.3f} W m-2")
     ex = (d["H_atm"] + d["LE_atm"] - d["H"] - d["LE"]).integrate("time")
     ew = ((d["LE_atm"] - d["LE"]) / LV).integrate("time")
     print(f"received minus reported over the segment: {float(ex) / 1.e6:.4f} MJ m-2 of energy, {float(ew):.5f} kg m-2 of water")
     big = abs(d["H"]) > 5.
-    err = max(float(abs(d["H_atm"] / d["H"] - 1.).where(big).max()), float(abs(d["LE_atm"] / d["LE"] - 1.).where(big).max()))
-    ok = err < TOL
+    err = (max(float(abs(d["H_atm"] / d["H"] - 1.).where(big).max()), float(abs(d["LE_atm"] / d["LE"] - 1.).where(big).max()))
+           if bool(big.any()) else 0.)
+    err_abs = max(float(abs(d["H_atm"] - d["H"]).max()), float(abs(d["LE_atm"] - d["LE"]).max()))
+    ok = err < TOL and err_abs < TOL_ABS
     print(f"{'PASS' if ok else 'FAIL'}: largest |received / reported - 1| while |H| > 5 W m-2 is {err:.3e} (tolerance {TOL:.0e}); "
-          f"largest |res_atm - res_land| is {float(abs(d['res_atm'] - d['res_land']).max()):.3e} W m-2")
+          f"largest |received - reported| is {err_abs:.3e} W m-2 (tolerance {TOL_ABS:.0e})")
     if ref is None:
         return ok
     e, c, cr = coupling(ref), clouds(run), clouds(ref)

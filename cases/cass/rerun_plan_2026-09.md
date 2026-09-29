@@ -375,9 +375,20 @@ Size of the change in the small test (new code against old code, same seed):
 - The change in delivered energy is less than the 7 to 8 % of the error, because the surface energy balance
   repartitions: the skin is 0.6 to 0.8 K cooler, the ground heat flux 4 % smaller, H + LE reported by the land
   model 1.6 % larger.
-- First cloud 16:35 UTC (old 16:30), one statistics sample later.
-- Cloud cover, liquid water path and cloud top are not interpreted from one pair of small runs; a second seed
-  with both binaries (job 59086324) gives the spread between realizations.
+- First cloud 16:35 UTC (old 16:30), one statistics sample later, in both seeds.
+- Second seed with both binaries (job 59086324), means over 17 to 23 UTC, change by the fix in seed 1 and seed 2
+  against the difference between the seeds: cloud base -39 and -29 m (seeds differ by 1 to 9 m); highest cloud top
+  -146 and -152 m (15 to 22 m); cloud cover -0.006 and -0.005 of 0.115 (0.002 to 0.003); liquid water path -1.0 and
+  -1.9 of 8 to 9 g/m2 (0.1 to 1.0). Energy delivered -5.1 % in both seeds. Small domain (6.4 km, 100 m grid).
+
+Further tests of the fixed binary:
+
+| Test | Result |
+|---|---|
+| Restart at 46800 s with the fixed `sbatch_restart.sh` | same surface density of the dynamics (1.1483064403434942); received equals reported; H, LE, thl equal to the continuous run within 5e-10 |
+| `swupdatebasestate=0`, old against fixed binary | 3D fields and 1084 of 1089 statistics variables identical; `thv_diff`, `thv_flux` differ in the last bit (4e-22 on 0.15) |
+| Binary with the nudging factor per variable (8dfd95410) against the fixed binary, land test | 3D fields identical at 18000 s; 1096 of 1109 statistics variables identical, `thv_diff`, `thv_flux`, `ql_diff` differ in the last bit (1e-17 on 0.13) |
+| Full size, ray tracer, host memory allowance of a shared job (57 GB) | model holds 26.7 GB on the host and 51 GB on the GPU (80 GB); Slurm's MaxRSS (42 to 59 GB) includes file cache |
 
 ### What it means
 
