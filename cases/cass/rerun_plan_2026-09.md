@@ -426,8 +426,29 @@ and dump times in the interval:
 | Two-stream | 3.6 h | 2.0 h | 6.1 h | 11.7 h |
 | Ray tracer | 6.0 h | 13.3 h | 6.7 h | 26.0 h |
 
-One statistics sample cost 133 s in v2 and costs 160 s in the v3 full-size test (320 levels, four masks, tendencies).
-The statistics are computed on the host. Sampling every 300 s costs 7.4 h per v3 run.
+One statistics sample cost 133 s in v2 and costs 163 s in v3 (320 levels, four masks, tendencies). The statistics
+are computed on the host, on one CPU thread. Sampling every 300 s costs 7.6 h per v3 run.
+
+What the 163 s consist of (job 59087932, four full-size variants on one node, three samples each, wall time of an
+iteration with a statistics sample minus the 18.7 s of one without):
+
+| Variant | Statistics sample | Share of the production cost |
+|---|---|---|
+| Production: four conditional masks, tendencies, microphysics budget | 163 s | |
+| Without tendencies | 144 s | tendencies 19 s, 12 % |
+| Without conditional masks | 60 s | four masks 103 s, 63 %, about 26 s each |
+| Without both and without the microphysics budget | 50 s | domain statistics 50 s, 31 % |
+
+- The tendencies are a small share: dropping them would save 0.9 h per run. They are kept.
+- The copies from the GPU to the host are not part of this cost: they are made at every 60 s output and are in the
+  18.7 s.
+- The statistics kernels carry OpenMP directives over the levels, but the Perlmutter build does not enable OpenMP,
+  so the 32 CPU cores of a job are idle during the statistics. A build with OpenMP is untested here; it is the
+  lever for the later sweeps.
+
+Wall time projection for v3 (v2 shares scaled by the levels, measured radiation and statistics costs): two-stream
+about 16 h (limit 20 h), ray tracer about 33 h (limit 48 h). One ray tracer step costs 116 s at sunrise (v2 at the
+same sun height 112 s, daily mean in v2 54 s).
 
 What the 160 s are made of (job 59087932, four full-size two-stream variants on one node, three samples each;
 an iteration without statistics, with one radiation call and the 60 s output, takes 19 s):
