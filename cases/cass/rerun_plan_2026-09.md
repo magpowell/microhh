@@ -247,7 +247,8 @@ from scratch and was never put on tape. It is not needed: the atmospheric profil
 tables, and the radiation background composite in `cass_ls2d_input.nc` is kept. The ERA5 surface fields downloaded
 again on 2026-09-29 (`$SCRATCH/CASS_LES/shared_data/era5_land/`, one small file per year) and
 `cass_land_composite.py` are now the only source of the v3 soil and vegetation. They are on tape with the other
-run inputs: `/home/m/mpowell/CASS_LES/shared_data/shared_data_v3_2026-09-29.tar`.
+run inputs: `/home/m/mpowell/CASS_LES/shared_data/shared_data_v3_2026-09-29.tar`. ERA5's own surface fluxes for the
+case days, used only for comparison, are in `era5_flux_context_2026-09-29.tar` in the same folder.
 
 **Roughness lengths, two choices (settled 2026-09-29, also for the wind experiment).**
 - Heat: z0h = 0.003 m, as in v2. It is within 20 % of the IFS value for crops and mixed farming (0.0025 m,
@@ -262,9 +263,9 @@ run inputs: `/home/m/mpowell/CASS_LES/shared_data/shared_data_v3_2026-09-29.tar`
 **Surface partition, accepted as it is (test at 64 x 64 columns, job 59083205, 2026-09-29).** Bowen ratio at
 15 UTC, before any cloud: 0.40 (0.34 with the hand-set vegetation of v2; CASS table 0.72). At 18 UTC, with clouds in
 a small domain and therefore only indicative: 0.35 (0.28; CASS 0.67). The sum of sensible and latent heat flux at
-18 UTC is 517 W/m2 against 537 in the CASS table. ERA5's own fluxes at the site on the case days give 0.50 at
-15 UTC and 0.41 at 18 UTC (59 of the 119 days), so the model with ERA5 vegetation behaves like ERA5, and both are
-wetter than the CASS composite. Cloud base and onset are expected to differ from the benchmark for this reason.
+18 UTC is 517 W/m2 against 537 in the CASS table. ERA5's own fluxes at the site, averaged over the 119 case days,
+give 0.60 at 15 UTC and 0.49 at 18 UTC: between the model and the CASS composite. The model is therefore wetter
+than both. Cloud base and onset are expected to differ from the benchmark for this reason.
 The full-size 1D member gives the definitive partition.
 
 **Output.** Second dump stream (`[dump] swhf`): u, v, w, thl, qt, p as float32 below 6 km from 23700 s to 38400 s
