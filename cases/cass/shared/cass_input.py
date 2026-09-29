@@ -40,6 +40,15 @@ parser.add_argument('--nudge-scalars', action='store_true',
                     help='CASS specification: nudge thl and qt toward the composite sounding aloft. '
                          'nudgefac is 0 below --nudge-zbot and 1/--nudge-scalar-timescale above --nudge-ztop. '
                          'Needs [force] nudgelist=thl,qt and timedeplist_nudge=thl,qt (one nudgefac for all).')
+parser.add_argument('--cass-winds', action='store_true',
+                    help='CASS specification: composite winds, nudged at all heights on --nudge-wind-timescale '
+                         'with their own factor (nudgefac_u, nudgefac_v). The geostrophic wind is set to the '
+                         'nudging target (time-dependent u_geo, v_geo). Needs [force] swtimedep_geo=true and '
+                         'u,v in nudgelist and timedeplist_nudge.')
+parser.add_argument('--nudge-wind-timescale', type=float, default=3600., metavar='SECONDS')
+parser.add_argument('--flux-model-density', action='store_true',
+                    help='Convert the CASS surface fluxes with the surface density of the model dynamics '
+                         'and the latent heat of the model, so that the atmosphere receives the table values.')
 parser.add_argument('--nudge-zbot', type=float, default=4500., metavar='M')
 parser.add_argument('--nudge-ztop', type=float, default=5000., metavar='M')
 parser.add_argument('--nudge-scalar-timescale', type=float, default=3600., metavar='SECONDS')
@@ -60,6 +69,10 @@ if args.geo_wind is not None and args.wind_u is not None:
     parser.error("--geo-wind and --wind-u are mutually exclusive")
 if args.sun_wind is not None and (args.zero_winds or args.wind_u is not None or args.geo_wind is not None):
     parser.error("--sun-wind is mutually exclusive with --zero-winds, --wind-u, --geo-wind")
+
+if args.cass_winds and (args.zero_winds or args.wind_u is not None or args.geo_wind is not None
+                        or args.sun_wind is not None):
+    parser.error("--cass-winds is mutually exclusive with --zero-winds, --wind-u, --geo-wind, --sun-wind")
 
 float_type = "f8"
 
@@ -113,6 +126,7 @@ def add_nc_dim(name, size, nc):
 # Get number of vertical levels, size, and lat/lon from .ini file
 lat = None
 lon = None
+pbot = None
 datetime_utc = None
 with open('cass.ini') as f:
     section = None
@@ -130,6 +144,8 @@ with open('cass.ini') as f:
                 lat = float(line.split('=')[1])
             if key == 'lon':
                 lon = float(line.split('=')[1])
+        elif section == '[thermo]' and key == 'pbot':
+            pbot = float(line.split('=')[1].split('#')[0])
         elif section == '[time]' and key == 'datetime_utc':
             datetime_utc = line.split('=', 1)[1].split('#')[0].strip()
 
@@ -187,6 +203,12 @@ q_sfc = qt[0]        # Surface specific humidity (kg/kg)
 
 # Surface density
 rho = p0 / (Rd * T_sfc * (1. + 0.61 * q_sfc))
+
+if args.flux_model_density:
+    # As in Thermo_moist at start: thl and qt extrapolated to the surface, surface pressure pbot.
+    Lv = 2.501e6
+    thl_s, qt_s = (f[0] - 0.5 * (f[1] - f[0]) for f in (thl, qt))
+    rho = pbot / (Rd * (pbot / 1.e5)**(Rd / cp) * thl_s * (1. - (1. - 461.5 / Rd) * qt_s))
 
 # Convert to kinematic fluxes
 thl_flux = H / (rho * cp)      # K m/s
@@ -347,6 +369,9 @@ if args.nudge_scalars:
 else:
     nudgefac = np.ones(kmax) / nudge_timescale
 add_nc_var("nudgefac", ("z",), nc_group_init, nudgefac)
+if args.cass_winds:
+    for name in ("nudgefac_u", "nudgefac_v"):
+        add_nc_var(name, ("z",), nc_group_init, np.ones(kmax) / args.nudge_wind_timescale)
 
 # Aerosol initial profiles: composite-mean on LES z grid
 for name in aerosol_names:
@@ -392,7 +417,7 @@ if args.nudge_scalars:
 # For --sun-wind: write u_geo, v_geo to the timedep group (aligned with the
 # nudge target) so swtimedep_geo=true picks them up; Coriolis tendency then
 # vanishes when the BL wind matches the prescription.
-if args.sun_wind is not None:
+if args.sun_wind is not None or args.cass_winds:
     add_nc_var("u_geo", ("time_ls", "z"), nc_group_timedep, u_nudge_arr)
     add_nc_var("v_geo", ("time_ls", "z"), nc_group_timedep, v_nudge_arr)
 
@@ -468,7 +493,8 @@ wind_desc = ("zero winds" if args.zero_winds
              else f"u={args.wind_u:.1f} m/s (constant), v=0" if args.wind_u is not None
              else f"geo wind ug={args.geo_wind:.1f} m/s, vg=0" if args.geo_wind is not None
              else f"sun-tracking wind, U={args.sun_wind:.1f} m/s anti-solar (time-dep u_nudge, v_nudge, u_geo, v_geo)" if args.sun_wind is not None
-             else "ERA5 composite winds")
+             else f"CASS composite winds, nudged on {args.nudge_wind_timescale:.0f} s, geostrophic wind = target" if args.cass_winds
+             else "CASS composite winds")
 print(f"   winds: {wind_desc}")
 if args.nudge_scalars:
     print(f"   nudgefac = 0 below {args.nudge_zbot:.0f} m, 1/{args.nudge_scalar_timescale:.0f} s above "

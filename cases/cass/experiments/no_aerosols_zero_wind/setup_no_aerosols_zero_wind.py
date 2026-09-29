@@ -52,8 +52,11 @@ SCRATCH      = Path(os.environ["SCRATCH"])
 EXP_NAME     = "no_aerosols_zero_wind"
 
 RADS = {"v2": ["2stream", "raytracer"], "v3": ["2stream", "raytracer", "raytracer_swmatch"]}
-# Set up only when named with --rt: two-stream radiation with the CASS surface fluxes prescribed (benchmark check).
-EXTRA_RADS = {"v3": ["2stream_prescribed"]}
+# Set up only when named with --rt, two-stream radiation, hourly 3D output only:
+#   2stream_prescribed  zero winds, CASS surface fluxes (test of the prescribed-flux path)
+#   2stream_wind        CASS winds, interactive land surface
+#   2stream_cass        CASS winds, CASS surface fluxes (the CASS case in MicroHH)
+EXTRA_RADS = {"v3": ["2stream_prescribed", "2stream_wind", "2stream_cass"]}
 REPS = [1, 2, 3, 4]
 # (section, key, value): CASS surface fluxes from the input file, no land-surface model, no high-frequency stream.
 PRESCRIBED = [
@@ -83,6 +86,13 @@ V3_MASKS = ("couvreux", "wplus", "ql", "qlcore")
 LAND = "cass_land_composite_12utc.nc"            # ERA5 soil and vegetation at the start hour (cass_land_composite.py)
 V3_INPUT_ARGS = ["--zero-winds", "--nudge-scalars", "--exner-ls", "--taper-wls", "--land-composite", LAND]
 V3_LAND_KEYS = ("c_veg", "lai", "rs_veg_min", "gD")
+# CASS winds: nudged on 1 h at all heights, geostrophic wind equal to the nudging target.
+WIND = [
+    ("force", "nudgelist", "u,v,thl,qt"), ("force", "timedeplist_nudge", "u,v,thl,qt"),
+    ("force", "swtimedep_geo", "true"), ("dump", "swhf", "0"),
+]
+WIND_INPUT_ARGS = ["--cass-winds"] + V3_INPUT_ARGS[1:]
+INPUT_ARGS = {"2stream_wind": WIND_INPUT_ARGS, "2stream_cass": WIND_INPUT_ARGS + ["--flux-model-density"]}
 
 
 def exp_root(version: str, debug: bool, tag: str = "") -> Path:
@@ -188,7 +198,10 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False, version: str = "v3") -
         with netCDF4.Dataset(SHARED_DIR / "data" / LAND) as f:
             for key in V3_LAND_KEYS:
                 cfg.set("land_surface", key, f"{float(f.getncattr(key)):.4g}")
-        if rt == "2stream_prescribed":
+        if rt in ("2stream_wind", "2stream_cass"):
+            for sec, key, val in WIND:
+                cfg.set(sec, key, val)
+        if rt in ("2stream_prescribed", "2stream_cass"):
             for sec, key, val in PRESCRIBED:
                 cfg.set(sec, key, val)
             cfg.remove_option("boundary", "swconstantz0")
@@ -216,12 +229,13 @@ def setup_rep(rt: str, rep: int, dry_run: bool, debug: bool = False, version: st
         run_dir.mkdir(parents=True, exist_ok=True)
 
     cfg = merge_ini(rndseed=rep, rt=rt, debug=debug, version=version)
+    winds = "CASS winds" if rt in INPUT_ARGS else "zero winds"
     if dry_run:
-        print(f"  [dry] write cass.ini  (rndseed={rep}, swaerosol=false, zero winds)")
+        print(f"  [dry] write cass.ini  (rndseed={rep}, swaerosol=false, {winds})")
     else:
         with open(run_dir / "cass.ini", "w") as f:
             cfg.write(f)
-        print(f"  wrote cass.ini  (rndseed={rep}, swaerosol=false, zero winds)")
+        print(f"  wrote cass.ini  (rndseed={rep}, swaerosol=false, {winds})")
 
     symlink(MICROHH_EXEC, run_dir / "microhh", dry_run)
 
@@ -235,7 +249,7 @@ def setup_rep(rt: str, rep: int, dry_run: bool, debug: bool = False, version: st
         symlink(SHARED_DIR / "data" / name, run_dir / name, dry_run)
 
     if input_args is None:
-        input_args = V3_INPUT_ARGS if version == "v3" else ["--zero-winds"]
+        input_args = INPUT_ARGS.get(rt, V3_INPUT_ARGS) if version == "v3" else ["--zero-winds"]
     if dry_run:
         print("  [dry] python cass_input.py " + " ".join(input_args))
         return
