@@ -1520,7 +1520,8 @@ template<typename TF>
 void Fields<TF>::exec_dump(Dump<TF>& dump, unsigned long iotime)
 {
     for (auto& it : dumplist)
-        dump.save_dump(a.at(it)->fld.data(), a.at(it)->name, iotime);
+        if (dump.needs(it))
+            dump.save_dump(a.at(it)->fld.data(), a.at(it)->name, iotime);
 }
 
 #ifndef USECUDA

@@ -43,6 +43,7 @@ class Dump
         std::vector<std::string>& get_dumplist();
 
         bool do_dump(unsigned long, unsigned long);
+        bool needs(const std::string&);
         void save_dump(TF*, const std::string&, int);
 
     private:
@@ -56,5 +57,19 @@ class Dump
         bool swdoubledump;                 // On/off switch for two consecutive dumps in time
         double sampletime;
         unsigned long isampletime;
+
+        // Second, high-frequency stream: own cadence and time window, float32, levels below hf_zmax.
+        bool swhf;
+        std::vector<std::string> regular_list;
+        std::vector<std::string> hf_list;
+        double hf_sampletime;
+        double hf_starttime;
+        double hf_endtime;
+        double hf_zmax;
+        unsigned long ihf_sampletime;
+        unsigned long ihf_starttime;
+        unsigned long ihf_endtime;
+        bool do_regular;
+        bool do_hf;
 };
 #endif

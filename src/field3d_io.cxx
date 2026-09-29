@@ -20,6 +20,7 @@
  * along with MicroHH.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <vector>
 #include <cstdio>
 #include <iostream>
 #include <cmath>
@@ -130,6 +131,60 @@ int Field3d_io<TF>::save_field3d(
         if (MPI_File_write_all(fh, tmp1, count, mpi_fp_type<TF>(), MPI_STATUS_IGNORE))
             return 1;
     }
+
+    if (MPI_File_close(&fh))
+        return 1;
+
+    MPI_Type_free(&subarray);
+
+    return 0;
+}
+
+template<typename TF>
+int Field3d_io<TF>::save_field3d_float(
+        TF* const restrict data, const char* filename,
+        const int kstart, const int kend)
+{
+    auto& gd = grid.get_grid_data();
+    auto& md = master.get_MPI_data();
+
+    const int jj    = gd.icells;
+    const int kk    = gd.icells*gd.jcells;
+    const int jjb   = gd.imax;
+    const int kkb   = gd.imax*gd.jmax;
+    const int kmax  = kend-kstart;
+    const int count = gd.imax*gd.jmax*kmax;
+
+    std::vector<float> buf(count);
+
+    for (int k=0; k<kmax; ++k)
+        for (int j=0; j<gd.jmax; ++j)
+            for (int i=0; i<gd.imax; ++i)
+            {
+                const int ijk  = i+gd.igc + (j+gd.jgc)*jj + (k+kstart)*kk;
+                const int ijkb = i + j*jjb + k*kkb;
+                buf[ijkb] = static_cast<float>(data[ijk]);
+            }
+
+    MPI_Datatype subarray;
+    int totsize [3] = {kmax, gd.jtot, gd.itot};
+    int subsize [3] = {kmax, gd.jmax, gd.imax};
+    int substart[3] = {0, md.mpicoordy*gd.jmax, md.mpicoordx*gd.imax};
+    MPI_Type_create_subarray(3, totsize, subsize, substart, MPI_ORDER_C, MPI_FLOAT, &subarray);
+    MPI_Type_commit(&subarray);
+
+    MPI_File fh;
+    if (MPI_File_open(md.commxy, filename, MPI_MODE_CREATE | MPI_MODE_WRONLY | MPI_MODE_EXCL, MPI_INFO_NULL, &fh))
+        return 1;
+
+    MPI_Offset fileoff = 0;
+    char name[] = "native";
+
+    if (MPI_File_set_view(fh, fileoff, MPI_FLOAT, subarray, name, MPI_INFO_NULL))
+        return 1;
+
+    if (MPI_File_write_all(fh, buf.data(), count, MPI_FLOAT, MPI_STATUS_IGNORE))
+        return 1;
 
     if (MPI_File_close(&fh))
         return 1;
@@ -701,6 +756,40 @@ int Field3d_io<TF>::save_field3d(
         {
             const int ijk = gd.istart + j*jj + k*kk;
             if( fwrite(&tmp1[ijk], sizeof(TF), gd.imax, pFile) != (unsigned)gd.imax)
+                return 1;
+        }
+
+    fclose(pFile);
+
+    return 0;
+}
+
+template<typename TF>
+int Field3d_io<TF>::save_field3d_float(
+        TF* const restrict data, const char* filename,
+        const int kstart, const int kend)
+{
+    auto& gd = grid.get_grid_data();
+
+    FILE *pFile;
+    pFile = fopen(filename, "wbx");
+
+    if (pFile == NULL)
+        return 1;
+
+    const int jj = gd.icells;
+    const int kk = gd.icells*gd.jcells;
+
+    std::vector<float> row(gd.imax);
+
+    for (int k=kstart; k<kend; ++k)
+        for (int j=gd.jstart; j<gd.jend; ++j)
+        {
+            const int ijk = gd.istart + j*jj + k*kk;
+            for (int i=0; i<gd.imax; ++i)
+                row[i] = static_cast<float>(data[ijk+i]);
+
+            if (fwrite(row.data(), sizeof(float), gd.imax, pFile) != (unsigned)gd.imax)
                 return 1;
         }
 

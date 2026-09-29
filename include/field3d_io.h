@@ -36,6 +36,7 @@ class Field3d_io
         ~Field3d_io();
 
         int save_field3d(TF*, TF*, TF*, const char*, const TF, int, int); // Saves a full 3d field.
+        int save_field3d_float(TF*, const char*, int, int); // Saves levels kstart..kend-1 as 32-bit floats.
         int load_field3d(TF*, TF*, TF*, const char*, const TF, int, int); // Loads a full 3d field.
 
         int save_xz_slice(TF*, TF, TF*, const char*, int, int, int); // Saves a xz-slice from a 3d field.

@@ -2425,6 +2425,9 @@ void Thermo_moist<TF>::exec_dump(Dump<TF>& dump, unsigned long iotime)
 
     for (auto& it : dumplist)
     {
+        if (!dump.needs(it))
+            continue;
+
         if (check_field_exists(it))
             get_thermo_field(*output, it, false, true);
         else
