@@ -634,3 +634,30 @@ v3 small tests, same binary and input, no clouds, same water vapour path and sam
   files), not a 3D effect. About 3 of the 7 W/m2 by which the domain-mean surface shortwave of 3D exceeds 1D
   around midday may come from it. The matched run is matched to the two-stream of the ray tracer path and carries
   the same offset (+1.7 to +3.6 W/m2 against the 1D run before and around the first clouds).
+
+### How to state the domain-mean result until the clear-sky difference is traced (user, 2026-09-29)
+
+"3D exceeds 1D by about 7 W/m2 in the afternoon mean, of which up to about 3 W/m2 may come from a clear-sky
+difference between the radiation code paths rather than from 3D effects." The matched-run conclusion is
+unaffected, since the matching absorbed the offset. Runs 1 and 2 use the two code paths, so the offset is inside
+every 3D minus 1D domain-mean shortwave number of the production runs.
+
+### Trace of the clear-sky difference (in progress, 2026-09-29)
+
+- Radiation library: the binary is built from the submodule `rte-rrtmgp-cpp` inside the MicroHH repository
+  (`CMakeLists.txt` l.155-167, `main/CMakeLists.txt` l.48), commit 416a6706 of 2024-02-20, the commit upstream
+  MicroHH pins on `main` and `develop`. Two-stream runs use its `src_cuda` and `src_kernels_cuda`, ray tracer runs
+  its `src_cuda_rt` and `src_kernels_cuda_rt`: two copies of the gas optics and of the two-stream solver. The
+  library's own repository (microhh/rte-rrtmgp-cpp, `main` at b602dc26) is 223 commits ahead of the pin, with
+  rewritten gas optics kernels in both copies. The separate checkout `~/repos/rte-rrtmgp-cpp` is not used by MicroHH.
+- Established from the model output (v3 small tests, clear sky): the flux at the domain top is the same (0.001
+  W/m2); the optical depth of the direct beam per layer in the ray tracer path is 11 to 15 % larger at 8 km, equal
+  near 3.5 km and 6 to 10 % smaller at the surface than in the two-stream path, at every height of the sun; the
+  column total is 1 to 1.6 % smaller; the longwave agrees to 0.04 W/m2.
+- Ruled out by reading: the inputs MicroHH passes (pressure, temperature, water vapour, gas columns:
+  `src/radiation_rrtmgp.cu` l.920-935, `src/radiation_rrtmgp_rt.cu` l.1624-1642), the background column and the
+  flux per spectral point at the domain top (`solve_shortwave_column` is the same code in both), the radiation
+  settings, and the kernels for interpolation, major gases, minor gases, Rayleigh scattering and gas columns,
+  which are the same mathematics in both copies.
+- Running: the standalone programs of the pinned library on one column taken from the model (`$SCRATCH/CASS_LES/
+  debug/rte_codepath_test/`), with the optical depth per spectral point from both copies.
