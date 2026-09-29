@@ -272,3 +272,53 @@ The full-size 1D member gives the definitive partition.
 (11:58 to 16:03 local solar time), every 60 s for member 1 of `2stream` and `raytracer`, every 300 s otherwise.
 Hourly full fields include p, ql and b. Statistics add the `qlcore` mask, per-process tendencies
 (`swtendency`) and warm-rain process rates.
+
+## 12. v3 run list (user, 2026-09-29)
+
+All runs: aerosol off, 12:00 UTC start, v3 forcing and land surface (section 11).
+
+| Run | Radiation | Surface | Wind | Members | Binary |
+|---|---|---|---|---|---|
+| 1 | 3D (ray tracer) | interactive | zero | 4 | validated `2.0.2-46-g0d7fd9b22` |
+| 2 | 1D (two-stream) | interactive | zero | 4 | same |
+| 3 | 1D | interactive | CASS composite winds | 1 | needs per-variable nudging |
+| 4 | 1D | CASS prescribed fluxes | CASS composite winds | 1 | needs per-variable nudging |
+
+Each comparison changes one thing: run 4 to run 3 the land surface, run 3 to run 2 the wind, run 2 to run 1 the
+radiation. Run 4 is the one compared with the CASS composite. Runs 1 and 2 come first. The four 3D members with
+the mean shortwave matched to 1D (`raytracer_swmatch`) are postponed, not dropped.
+
+Runs 3 and 4 follow CASS: winds nudged toward the composite winds at all heights on 1 h; theta_l and q_t nudged
+above 5 km on 1 h and not below. MicroHH applies one profile `nudgefac(z)` to every nudged variable, so this needs
+a per-variable profile (small change in `src/force.cxx`), a rebuild and the bit-identity test. Runs 1 and 2 nudge
+only theta_l and q_t and use the validated binary.
+
+Remaining differences of run 4 from CASS: fixed droplet number 200 cm-3 (CASS: aerosol number 600 cm-3 in its
+microphysics); grid 25 m, 25.6 km wide, 8 km deep (CASS: 20 m, 29 km, 16 km); RRTMGP instead of RRTMG.
+
+## 13. Coriolis force with a zero geostrophic wind (found 2026-09-29) - fix in the wind experiment
+
+`cass_base.ini` has `swlspres=geo` with `fc=8.5e-5`. When `cass_input.nc` holds no `u_geo`/`v_geo`, MicroHH fills
+them with zero. The Coriolis force then acts on the full wind and the nudging cannot balance it. For a target
+(U, 0) the steady wind above the boundary layer is U / (1 + a^2) times (1, -a), with a = f tau:
+
+| Nudging time scale | Speed for a 5 m/s target | Turned by |
+|---|---|---|
+| 3 h (old default) | 3.7 m/s | 43 degrees |
+| 1 h | 4.8 m/s | 17 degrees |
+| 30 min | 4.9 m/s | 9 degrees |
+
+Which old runs are affected (from `shared/cass_input.py` and the input files):
+
+| Runs | Wind option | Geostrophic wind written | Affected |
+|---|---|---|---|
+| `base`, `no_aerosols` | CASS composite winds (no flag) | no | YES |
+| `wind_u` sweep (archived 2026-04) | `--wind-u` | no | YES |
+| `wind_geo` sweep | `--geo-wind` | yes, equal to the target | no |
+| `wind_sun` | `--sun-wind` | yes, equal to the target | no (its direction error was the solar-azimuth time origin, fixed in 36e6ab0ef) |
+| zero-wind runs | `--zero-winds` | no | no (no wind) |
+
+For the affected runs the wind speeds are lower than labelled and the direction is turned, so speeds and anything
+about wind direction relative to the sun cannot be used from them. Fix for v3 runs 3 and 4 and for the wind
+experiment: write the geostrophic wind equal to the nudging target (time-dependent for the CASS winds, which needs
+`swtimedep_geo=true`), so that the Coriolis term vanishes at the target.
