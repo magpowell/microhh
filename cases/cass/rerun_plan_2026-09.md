@@ -704,3 +704,23 @@ every 3D minus 1D domain-mean shortwave number of the production runs.
 - Correction would be one line (`*gas_concs_gpu` at l.1724). NOT applied: the trace was read-only and the four 3D
   production jobs are queued with the binary that has the error. Decision of the user pending; the tag
   `v3-production` waits for it.
+
+### Whole-day small ray tracer test with the corrected density (2026-09-29)
+
+`debug/no_aerosols_zero_wind_v3_rtfix/raytracer/rep_01` (64 x 64, binary of runs 1 and 2), job 59089981 to 29294 s
+(ended by the time limit as planned), restart job 59089983 to 50000 s (COMPLETED). `check_surface_coupling.py`:
+
+| Segment | Received over reported flux, minus one | Residual of the energy balance, mean | Largest |
+|---|---|---|---|
+| 0, to 20:08 UTC | 7e-15 | 0.39 W/m2 | 0.77 W/m2 |
+| 1, to 24:24 UTC | 7e-15 | 0.26 W/m2 | 1.9 W/m2 |
+| 1, 24:30 to 25:05 UTC | 7e-15 | | 15.2 W/m2 |
+
+- The coupling passes for the whole day, the restart included.
+- Evening transition, 24:24 to 25:10 UTC (cosine of the zenith angle 0.23 to 0.10): the land surface of the whole
+  domain changes between two states from one 60 s cross-section to the next (latent heat flux 65 and 15 W/m2,
+  upwelling longwave 485 and 468 W/m2), so a sample of the fluxes does not balance the net radiation of the
+  same time. The shortwave is smooth. It is not the ray tracer and not the density correction: the two-stream
+  test with the old binary and seed 2 (`_v3_seed2old`) shows the same (64, 60, 18, 48, 42, 11 W/m2 at 300 s),
+  the other two-stream tests do not, the test with CASS winds is smooth. Cause not looked at. It is after the
+  window of the analysis (10 to 17 local solar time).
