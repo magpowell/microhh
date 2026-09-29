@@ -58,8 +58,8 @@ REPS = [1, 2, 3, 4]
 V3 = [
     ("grid", "zsize", "8000"), ("grid", "ktot", "320"),
     ("buffer", "zstart", "6400"),
-    ("boundary", "z0m", "0.035"),      # CASS specification
-    ("boundary", "z0h", "0.003"),      # choice: CASS gives one length and prescribed fluxes; z0m/z0h = 11.7, as in v2
+    ("boundary", "z0m", "0.035"),      # CASS value (not the IFS crop value 0.25)
+    ("boundary", "z0h", "0.003"),      # choice, as in v2; within 20 % of the IFS crop value 0.0025
     ("force", "nudgelist", "thl,qt"), ("force", "timedeplist_nudge", "thl,qt"),
     ("stats", "swtendency", "1"),
     ("micro", "swmicrobudget", "1"),

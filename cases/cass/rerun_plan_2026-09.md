@@ -241,12 +241,31 @@ vegetation type in Table 8.1 of the IFS documentation Cy41r2 (the ERA5 cycle), P
 v2 soil composite at 10 UTC exactly; moving to 12 UTC leaves soil moisture unchanged (within 0.0002) and cools the
 two upper soil layers by 0.2 and 0.4 K. Initial soil moisture is about halfway between wilting point (0.151) and
 field capacity (0.346). The vegetation values are not tuned: the resulting surface partition is accepted as it is.
-The ERA5 files are small and are kept in `$SCRATCH/CASS_LES/shared_data/era5_land/`; the per-day LS2D cache of
-2026-02 was purged from scratch.
 
-**Heat roughness, a choice.** CASS gives one roughness length (0.035 m) and used prescribed surface fluxes, for
-which the heat roughness has no effect on the fluxes. v3 keeps z0h = 0.003 m as in v2, so z0m / z0h = 11.7. For
-reference, the IFS table uses z0m / z0h = 100 for low vegetation (crops: 0.25 and 0.0025 m).
+**ERA5 data.** The per-day LS2D cache of 2026-02 (`$SCRATCH/LS2D_ERA5/cass`, model levels and surface) was purged
+from scratch and was never put on tape. It is not needed: the atmospheric profiles and forcing come from the CASS
+tables, and the radiation background composite in `cass_ls2d_input.nc` is kept. The ERA5 surface fields downloaded
+again on 2026-09-29 (`$SCRATCH/CASS_LES/shared_data/era5_land/`, one small file per year) and
+`cass_land_composite.py` are now the only source of the v3 soil and vegetation. They are on tape with the other
+run inputs: `/home/m/mpowell/CASS_LES/shared_data/shared_data_v3_2026-09-29.tar`.
+
+**Roughness lengths, two choices (settled 2026-09-29, also for the wind experiment).**
+- Heat: z0h = 0.003 m, as in v2. It is within 20 % of the IFS value for crops and mixed farming (0.0025 m,
+  Table 8.3), the vegetation type the canopy parameters come from. CASS does not constrain it: it gives one
+  roughness length and used prescribed surface fluxes, for which the heat roughness has no effect on the fluxes.
+- Momentum: z0m = 0.035 m, the CASS value, not the IFS value for crops (0.25 m). In the zero-wind base case it
+  matters little. In the wind experiment it sets the friction velocity and the near-surface shear, and the choice
+  there is the same: the CASS value.
+- So z0m / z0h = 11.7 (IFS: 100 for low vegetation). For the methods: the heat roughness matches the IFS crop
+  value and the momentum roughness follows CASS.
+
+**Surface partition, accepted as it is (test at 64 x 64 columns, job 59083205, 2026-09-29).** Bowen ratio at
+15 UTC, before any cloud: 0.40 (0.34 with the hand-set vegetation of v2; CASS table 0.72). At 18 UTC, with clouds in
+a small domain and therefore only indicative: 0.35 (0.28; CASS 0.67). The sum of sensible and latent heat flux at
+18 UTC is 517 W/m2 against 537 in the CASS table. ERA5's own fluxes at the site on the case days give 0.50 at
+15 UTC and 0.41 at 18 UTC (59 of the 119 days), so the model with ERA5 vegetation behaves like ERA5, and both are
+wetter than the CASS composite. Cloud base and onset are expected to differ from the benchmark for this reason.
+The full-size 1D member gives the definitive partition.
 
 **Output.** Second dump stream (`[dump] swhf`): u, v, w, thl, qt, p as float32 below 6 km from 23700 s to 38400 s
 (11:58 to 16:03 local solar time), every 60 s for member 1 of `2stream` and `raytracer`, every 300 s otherwise.
