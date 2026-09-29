@@ -450,21 +450,5 @@ Wall time projection for v3 (v2 shares scaled by the levels, measured radiation 
 about 16 h (limit 20 h), ray tracer about 33 h (limit 48 h). One ray tracer step costs 116 s at sunrise (v2 at the
 same sun height 112 s, daily mean in v2 54 s).
 
-What the 160 s are made of (job 59087932, four full-size two-stream variants on one node, three samples each;
-an iteration without statistics, with one radiation call and the 60 s output, takes 19 s):
-
-| Variant | Wall time of a statistics sample |
-|---|---|
-| Production: four conditional masks, tendencies, microphysics budget | 163 s |
-| Without tendencies | 145 s |
-| Without conditional masks | 60 s |
-| Without masks, tendencies and microphysics budget | 50 s |
-
-- The conditional masks (couvreux, wplus, ql, qlcore) cost 95 to 103 s, about 25 s each: 60 % of the total.
-- The statistics of the whole domain cost 50 s: 30 %.
-- The tendencies cost 10 to 18 s: 11 %, or 0.8 h per run. They are kept.
-- The copies from the GPU to the host are made at every 60 s output as well and are part of the 19 s.
-
-Projection for v3: two-stream 16 h (limit 20 h); ray tracer 33 h (limit 48 h; one ray tracer call takes 116 s at
-sunrise, as in v2 at the same height of the sun, against 54 s on the daily mean of v2). Each ray tracer job has a
-restart job chained to it (`sbatch_restart.sh`), which exits at once when the run is complete.
+Each ray tracer job has a restart job chained to it (`sbatch_restart.sh`, jobs 59088462, 59088464, 59088467,
+59088468), which exits at once when the run is complete.
