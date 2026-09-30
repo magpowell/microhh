@@ -447,3 +447,38 @@ if __name__ == "__main__":
     print(figure10(a.expt))
     for fn in (figure11, figure12, figure13, figure14):
         print(fn(a.expt))
+
+
+def figure15(expt, times=(36000, 39600), var="qt", mask="core"):
+    """Fractional entrainment of each cloud against its width; member medians per width class with min-max bands."""
+    import dilution as dl
+    d = dl.load_clouds(expt, mask)
+    e = f"eps_{var}"
+    fig, axs = plt.subplots(1, len(times), figsize=(4.2 * len(times), 3.8), sharey=True, constrained_layout=True)
+    h = []
+    for k, t in enumerate(times):
+        ax = axs[k]
+        g, _ = dl.binned(d[d.t == t], var)
+        for rt, lab in RTS:
+            c = d[(d.t == t) & (d.rt == rt) & (d[e] > 0.)]
+            ax.scatter(c.D, 1.e3 * c[e], s=5, alpha=0.2, lw=0, rasterized=True, **st.RT[lab])
+            b = g[g.rt == rt]
+            m = b.pivot(index="rep", columns="db", values="eps")
+            xd = b.groupby("db").D.mean().reindex(m.columns).values
+            ax.fill_between(xd, 1.e3 * np.nanmin(m.values, axis=0), 1.e3 * np.nanmax(m.values, axis=0), alpha=0.3, lw=0, **st.RT[lab])
+            l, = ax.plot(xd, 1.e3 * np.nanmean(m.values, axis=0), lw=1.8, marker="o", ms=4, label=lab, **st.RT[lab])
+            if k == 0:
+                h.append(l)
+        ref = d[(d.t == t) & (d.rt == RTS[0][0]) & (d[e] > 0.)]
+        x = np.array([300., 3000.])
+        l, = ax.plot(x, 1.e3 * np.median(ref[e] * ref.D) / x, color="0.4", lw=1., ls="--", label="1/D")
+        if k == 0:
+            h.append(l)
+        ax.set_xscale("log"); ax.set_yscale("log")
+        ax.set_xlim(250., 4000.); ax.set_ylim(0.05, 5.)
+        ax.set_xlabel("cloud width [m]")
+        st.apply(ax)
+        st.panel(ax, k, st.lt(float(d[d.t == t].lst.iloc[0])))
+    axs[0].set_ylabel(r"fractional entrainment [km$^{-1}$]")
+    fig.legend(handles=h, ncols=3, loc="outside lower center")
+    return st.savefig(fig, expt, f"fig15_dilution_width_{var}" + ("" if mask == "core" else f"_{mask}"))
