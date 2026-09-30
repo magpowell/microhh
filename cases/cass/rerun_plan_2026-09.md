@@ -701,9 +701,11 @@ every 3D minus 1D domain-mean shortwave number of the production runs.
 - Reach: every ray tracer run of MicroHH since the commit (CASS up to v2, the small v3 tests, GoAmazon, ARM97SD),
   with a size set by the `h2o` of each input. 3D_RT_DPSCREAM is not affected: all its legs come from one program
   and one input file (`scripts/rt/run_raytracer_all.sh` l.49, l.123-153).
-- Correction would be one line (`*gas_concs_gpu` at l.1724). NOT applied: the trace was read-only and the four 3D
-  production jobs are queued with the binary that has the error. Decision of the user pending; the tag
-  `v3-production` waits for it.
+- The model heats the air with the ray-traced absorption, so 3D runs had less shortwave heating below 1 km and
+  more aloft than 1D runs, unrelated to 3D transport: ray-traced heating of the model at 16 UTC against the
+  two-stream run -9.9 % below 1 km, -2.8 % between 1 and 4 km, +4.1 % between 4 and 8 km.
+- User, 2026-09-29: correct it before the 3D jobs start. v2-era runs will not be used in a publication; the JAS
+  paper is not affected (offline fluxes).
 
 ### Whole-day small ray tracer test with the corrected density (2026-09-29)
 
@@ -724,3 +726,20 @@ every 3D minus 1D domain-mean shortwave number of the production runs.
   test with the old binary and seed 2 (`_v3_seed2old`) shows the same (64, 60, 18, 48, 42, 11 W/m2 at 300 s),
   the other two-stream tests do not, the test with CASS winds is smooth. Cause not looked at. It is after the
   window of the analysis (10 to 17 local solar time).
+- User, 2026-09-29: log it and leave it. A guess, not a diagnosis: the wet-skin fraction switching on and off as
+  dew forms under weak turbulence (whole domain, two latent heat states, only without wind).
+
+### Correction of the water vapour in the ray tracer shortwave, and its tests (2026-09-29)
+
+- Commit adc50ae7b: `*gas_concs_gpu` in place of `gas_concs` at `src/radiation_rrtmgp_rt.cu` l.1724. It was the only
+  place: the other `gas_concs` in that file are function arguments of the initialisation (l.351, l.653), and the
+  longwave of the ray tracer class sets and passes the device object (l.1167, l.1203, l.1207-1216).
+- Binary `2.0.2-73-gadc50ae7b`, built from the clean commit; `~/validated_builds/candidate_microhh_2.0.2-73-gadc50ae7b`,
+  sha256 4b3c10ab8b15b04de62c91479b46d71ce9c2f83563e310aafead9a7ef36a7fad.
+- Tests (64 x 64, `debug/no_aerosols_zero_wind_v3_h2ofix`, jobs 59096375 and 59096377): (1) the two radiation
+  classes agree in clear sky, (2) the longwave of the ray tracer run agrees with the two-stream run, (3) the
+  two-stream runs (runs 2, 3 and 4) are bit-identical to the tests with the binaries of 2026-09-29.
+- The four 3D production folders point to the candidate binary since 17:35 (jobs pending before and after), the
+  old link is kept as `microhh.before_h2ofix`. Rule of the user: if test (1) fails, point them back at once,
+  before the jobs can start. If the tests pass: switch the six 1D folders only if (3) holds, then tag adc50ae7b
+  as `v3-production`.
