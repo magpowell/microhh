@@ -54,11 +54,12 @@ def layer_mean(f, z, z0, z1):
     return f[k].mean(axis=0)
 
 
-def lifted_parcel(thl_p, qt_p, p, exn, kb):
-    """Surface parcel lifted through levels 0..kb: LCL level index (or -1) and its ql at kb."""
+def lifted_parcel(thl_p, qt_p, p, exn, kb, ktop=None):
+    """Surface parcel lifted through levels 0..ktop (default kb): LCL level index (or -1) and its ql at kb."""
+    ktop = kb if ktop is None else ktop
     lcl = np.full(thl_p.shape, -1, dtype=int)
     ql_kb = np.zeros(thl_p.shape)
-    for k in range(kb + 1):
+    for k in range(ktop + 1):
         a = th.sat_adjust(thl_p, qt_p, np.full(thl_p.shape, p[k]), np.full(thl_p.shape, exn[k]))
         ql = a["ql"] + a["qi"]
         lcl = np.where((lcl < 0) & (ql > 0.), k, lcl)
@@ -95,10 +96,17 @@ def analyse(expt, rt, rep, t):
     thl_sfc, qt_sfc = layer_mean(thl_a, z, 0., SFC_TOP), layer_mean(qt_a, z, 0., SFC_TOP)
     thl_up, qt_up = layer_mean(thl_a, z, UPPER[0] * zb, UPPER[1] * zb), layer_mean(qt_a, z, UPPER[0] * zb, UPPER[1] * zb)
     thl_p, qt_p = layer_mean(f["thl"], z, 0., SFC_TOP), layer_mean(f["qt"], z, 0., SFC_TOP)
-    lcl, ql_kb = lifted_parcel(thl_p.astype(float), qt_p.astype(float), bs["pref"], bs["exnref"], kb)
+    ktop = int(np.searchsorted(z, zb + 600.))
+    lcl, ql_kb = lifted_parcel(thl_p.astype(float), qt_p.astype(float), bs["pref"], bs["exnref"], kb, ktop)
     thv_p = th.theta_v(thl_p, qt_p, ql_kb, 0., bs["exnref"][kb])
     thv_env = th.theta_v(f["thl"][kb], f["qt"][kb], f["ql"][kb], f["qi"][kb], bs["exnref"][kb])
     b_kb = thv_p - thv_env
+    # parcel buoyancy where it first condenses, against the column at that level (dry parcel there)
+    kl = np.maximum(lcl, 0)
+    jj, ii = np.indices(kl.shape)
+    thv_env_lcl = th.theta_v(f["thl"][kl, jj, ii], f["qt"][kl, jj, ii], f["ql"][kl, jj, ii], f["qi"][kl, jj, ii], bs["exnref"][kl])
+    b_lcl = np.where(lcl >= 0, th.theta_v(thl_p, qt_p, 0., 0., bs["exnref"][kl]) - thv_env_lcl, np.nan)
+    z_lcl = np.where(lcl >= 0, z[kl], np.nan)
     rows = []
     for c, name in enumerate(CLASSES):
         m = cl == c
@@ -106,8 +114,8 @@ def analyse(expt, rt, rep, t):
             continue
         rows.append(dict(cls=name, n=int(m.sum()), frac=float(m.mean()), div_h=float(div[m].mean()), w05=float(w05[m].mean()), w09=float(w09[m].mean()),
                          thl_sfc=float(thl_sfc[m].mean()), qt_sfc=float(1.e3 * qt_sfc[m].mean()), thl_up=float(thl_up[m].mean()), qt_up=float(1.e3 * qt_up[m].mean()),
-                         lcl=float(np.where(lcl[m] >= 0, z[np.maximum(lcl[m], 0)], np.nan).mean()) if (lcl[m] >= 0).any() else np.nan,
-                         lcl_found=float((lcl[m] >= 0).mean()), b_kb=float(b_kb[m].mean()), b_kb_pos=float((b_kb[m] > 0.).mean()),
+                         lcl=float(np.nanmean(z_lcl[m])), lcl_minus_zb=float(np.nanmean(z_lcl[m]) - zb), lcl_found=float((lcl[m] >= 0).mean()),
+                         b_lcl=float(np.nanmean(b_lcl[m])), b_kb=float(b_kb[m].mean()), b_kb_pos=float((b_kb[m] > 0.).mean()),
                          anomaly=float(anomaly[m].mean())))
     d = pd.DataFrame(rows)
     ds = xr.Dataset.from_dataframe(d.set_index("cls"))
@@ -116,7 +124,7 @@ def analyse(expt, rt, rep, t):
     return ds
 
 
-VARS = ("frac", "div_h", "w05", "w09", "thl_sfc", "qt_sfc", "thl_up", "qt_up", "lcl", "b_kb", "b_kb_pos", "anomaly")
+VARS = ("frac", "div_h", "w05", "w09", "thl_sfc", "qt_sfc", "thl_up", "qt_up", "lcl", "lcl_minus_zb", "b_lcl", "b_kb", "b_kb_pos", "anomaly")
 
 
 def load(expt):
