@@ -93,6 +93,8 @@ def analyse(expt, rt, rep):
         cols.update({f"ref_within_{int(r)}": np.full(len(b), np.nan) for r in RADII})
         cols["n_clear"] = np.zeros(len(b), dtype=int)
         cols["n_existing"] = np.zeros(len(b), dtype=int)
+        cols["track_nearest"] = np.zeros(len(b), dtype=int)
+        by_frame = {f: g.track.values for f, g in feats.groupby("frame")}     # rows of a frame are in label order
         frames = b.frame_first.values
         for f in np.unique(frames):
             if f == 0:
@@ -108,13 +110,15 @@ def analyse(expt, rt, rep):
             cols["d_nearest"][rows], cols["along"][rows], cols["across"][rows] = d[j, i], along[j, i], across[j, i]
             nn = near[j, i]
             cols["D_nearest"][rows] = np.where(nn > 0, diam[np.maximum(nn - 1, 0)] if diam.size else np.nan, np.nan)
+            tr = by_frame.get(f - 1, np.zeros(0, dtype=int))
+            cols["track_nearest"][rows] = np.where(nn > 0, tr[np.maximum(nn - 1, 0)] if tr.size else 0, 0)
             for k, v in ref.items():
                 cols[k][rows] = v
             cols["n_existing"][rows] = len(np.unique(lab[lab > 0]))
     for k, v in cols.items():
         b[k] = v
     keep = ["track", "frame_first", "time_first", "lst", "x", "y", "area_birth", "area_max", "n_buoy_max", "lifetime", "merges_in",
-            "splits_out", "death", "d_nearest", "along", "across", "D_nearest", "n_existing", "n_clear", "ref_sunward"] + \
+            "splits_out", "death", "d_nearest", "along", "across", "D_nearest", "track_nearest", "n_existing", "n_clear", "ref_sunward"] + \
            [f"ref_within_{int(r)}" for r in RADII]
     out = xr.Dataset.from_dataframe(b[keep].reset_index(drop=True))
     out.attrs.update(expt=expt, rt=rt, rep=rep, domain_km2=run.xsize * run.ysize / 1.e6, min_area=MIN_AREA, dt=float(time[1] - time[0]))
