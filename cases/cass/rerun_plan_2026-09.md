@@ -758,3 +758,8 @@ every 3D minus 1D domain-mean shortwave number of the production runs.
   cover alike, LWP within the seed spread.
 - All ten production folders were switched to `microhh_2.0.2-73-gadc50ae7b` at 19:15 with 14 jobs pending and
   none running; tag `v3-production` on adc50ae7b, pushed.
+- 2026-09-30: the shared QoS accrues age priority for only two pending jobs per user (`MaxJobsAccruePU = 2`), which
+  would have serialised the eight base-case members in pairs behind runs 3 and 4. The eight jobs (zero age) and their
+  restarts were cancelled and resubmitted as two whole-node jobs in the regular QoS, four members each: 1D 59136701
+  (20 h), 3D 59136702 (48 h) with chained restart 59136703. Same binary, same folders. Run 3 (59088071) started
+  2026-09-30 15:06; run 4 (59088074) stays in the shared QoS.
