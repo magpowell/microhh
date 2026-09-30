@@ -521,17 +521,18 @@ and in the build files. The radiation submodule is at the commit upstream pins (
   previous job (`PARENT_JOB`) ended as TIMEOUT, NODE_FAIL or PREEMPTED, when the last lines of `cass.out` are
   finite and when the restart files are finite (`shared/check_finite.py`). A run job cancelled by hand is not
   restarted either. `test_sbatch_restart.sh`: 19 checks.
-- Production tag: `v3-production` marks the commit whose case scripts write the inis and inputs of runs 1 to 4 and
-  whose source is that of the production binaries. Binaries (read-only, `~/validated_builds/`; on tape in
-  `/home/m/mpowell/CASS_LES/shared_data/binaries_v3_2026-09-29.tar`):
+- Production tag: `v3-production` = commit adc50ae7b (set 2026-09-29 evening, pushed to the fork), whose case
+  scripts write the inis and inputs of runs 1 to 4 and whose source is that of the ONE production binary:
 
 | Binary | Source commit | sha256 | Runs |
 |---|---|---|---|
-| `microhh_2.0.2-51-gc40a8615c` | c40a8615c | 3ad7c98bdb9177d6ff73ca52128f22b84735a0b3984dff2ee1e1fc31e548cbdc | 1 and 2 |
-| `microhh_2.0.2-53-g8dfd95410` | 8dfd95410 | bfb41391303fd7389dd2369b70cbc5b678300ae48face8db4b470b5375504695 | 3 and 4 |
+| `microhh_2.0.2-73-gadc50ae7b` | adc50ae7b | 4b3c10ab8b15b04de62c91479b46d71ce9c2f83563e310aafead9a7ef36a7fad | 1 to 4 |
 
-  The two sources differ by the nudging factor per variable, which leaves runs without `nudgefac_<variable>`
-  unchanged (section 14, further tests). The source has not changed since 8dfd95410.
+  Read-only in `~/validated_builds/`, on tape in `/home/m/mpowell/CASS_LES/shared_data/binaries_v3_2026-09-29_h2ofix.tar`.
+  It replaced `microhh_2.0.2-51-gc40a8615c` (runs 1 and 2) and `microhh_2.0.2-53-g8dfd95410` (runs 3 and 4)
+  in all ten production folders on 2026-09-29 at 19:15, while every job was pending (the old link is kept as
+  `microhh.before_h2ofix` in each folder). The two-stream path of the new binary is bit-identical to both
+  (section 20, last subsection); the ray tracer path has the water vapour correction of section 20.
 
 ## 20. Surface energy balance residual of ray tracer runs: a diagnostic, not a leak (2026-09-29)
 
@@ -743,3 +744,17 @@ every 3D minus 1D domain-mean shortwave number of the production runs.
   old link is kept as `microhh.before_h2ofix`. Rule of the user: if test (1) fails, point them back at once,
   before the jobs can start. If the tests pass: switch the six 1D folders only if (3) holds, then tag adc50ae7b
   as `v3-production`.
+- Results (jobs 59096375 and 59096377, complete runs; two-stream runs to 50000 s, ray tracer to 29100 s):
+  (1) PASS: ray tracer run's two-stream minus two-stream run 0.00 W/m2 at the surface, 2 km and 6 km at 13 to 16
+  UTC, optical depth ratio per layer 1.0000 at 8 km and 0.9995 to 1.0002 at 12 m; ray-traced surface flux -0.2 to
+  +0.6 W/m2 from the two-stream (Monte Carlo noise, as within the ray tracer run before). Absorbed shortwave by
+  layer identical from the two-stream fluxes; ray-traced heating of the model -1.1 % below 1 km, 0.0 % between 4
+  and 8 km (before: -9.9 %, +4.1 %). (2) PASS: longwave within 0.03 W/m2 at the surface and the top. (3) PASS:
+  runs 2, 3 and 4 configurations bit-identical to the tests with the binaries of the morning: 0 of 225, 227 and
+  218 statistics variables differ, every line of `cass.out` identical, all 381, 381 and 325 3D files
+  byte-identical (`$SCRATCH/CASS_LES/debug/h2ofix_checks/bitident.py`, `clearsky.py`).
+- Corrected ray tracer run: coupling passes (6.7e-15), residual 0.38 mean, 0.64 max W/m2; against the
+  uncorrected ray tracer run: surface fluxes 0.5 % lower, first cloud 16:30 instead of 16:35 UTC, cloud base and
+  cover alike, LWP within the seed spread.
+- All ten production folders were switched to `microhh_2.0.2-73-gadc50ae7b` at 19:15 with 14 jobs pending and
+  none running; tag `v3-production` on adc50ae7b, pushed.
