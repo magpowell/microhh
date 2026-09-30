@@ -482,3 +482,31 @@ def figure15(expt, times=(36000, 39600), var="qt", mask="core"):
     axs[0].set_ylabel(r"fractional entrainment [km$^{-1}$]")
     fig.legend(handles=h, ncols=3, loc="outside lower center")
     return st.savefig(fig, expt, f"fig15_dilution_width_{var}" + ("" if mask == "core" else f"_{mask}"))
+
+
+def figure16(expt, times=(36000, 39600)):
+    """Cloud depth against the persistence of its cloudy site; member medians per duration class with min-max bands."""
+    import persistence as ps
+    d = ps.load_clouds(expt)
+    fig, axs = plt.subplots(1, len(times), figsize=(4.2 * len(times), 3.8), sharey=True, constrained_layout=True)
+    h = []
+    for k, t in enumerate(times):
+        ax = axs[k]
+        for rt, lab in RTS:
+            c = d[(d.t == t) & (d.rt == rt)]
+            ax.scatter(np.maximum(c.dur_mean, 0.5), c.depth, s=5, alpha=0.2, lw=0, rasterized=True, **st.RT[lab])
+            g = c.groupby(["rep", "ub"]).agg(depth=("depth", "median"), dur=("dur_mean", "median")).reset_index()
+            m = g.pivot(index="rep", columns="ub", values="depth")
+            xd = g.groupby("ub").dur.mean().reindex(m.columns).values
+            ax.fill_between(xd, np.nanmin(m.values, axis=0), np.nanmax(m.values, axis=0), alpha=0.3, lw=0, **st.RT[lab])
+            l, = ax.plot(xd, np.nanmean(m.values, axis=0), lw=1.8, marker="o", ms=4, label=lab, **st.RT[lab])
+            if k == 0:
+                h.append(l)
+        ax.set_xscale("log")
+        ax.set_xlim(0.4, 100.)
+        ax.set_xlabel("site persistence [min]")
+        st.apply(ax)
+        st.panel(ax, k, st.lt(float(d[d.t == t].lst.iloc[0])))
+    axs[0].set_ylabel("cloud depth [m]")
+    fig.legend(handles=h, ncols=2, loc="outside lower center")
+    return st.savefig(fig, expt, "fig16_depth_persistence")
