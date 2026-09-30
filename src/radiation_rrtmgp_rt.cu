@@ -1721,7 +1721,7 @@ void Radiation_rrtmgp_rt<TF>::exec_shortwave_rt(
                     p_lay,
                     p_lev,
                     t_lay,
-                    gas_concs,
+                    *gas_concs_gpu,
                     optical_props,
                     toa_src_temp,
                     col_dry);
