@@ -510,3 +510,29 @@ def figure16(expt, times=(36000, 39600)):
     axs[0].set_ylabel("cloud depth [m]")
     fig.legend(handles=h, ncols=2, loc="outside lower center")
     return st.savefig(fig, expt, "fig16_depth_persistence")
+
+
+def figure17(expt):
+    """Cloud births per area and hour, and their excess near existing clouds over random placement, by solar hour."""
+    import births as bi
+    d, area = bi.load_births(expt)
+    r, l = bi.rates(d, area), bi.location(d)
+    fig, axs = plt.subplots(1, 2, figsize=(8.4, 3.6), constrained_layout=True)
+    h = []
+    for lab in ("1D", "3D"):
+        x = r.index.values + 0.5
+        axs[0].fill_between(x, r[f"clouds_{lab}_lo"], r[f"clouds_{lab}_hi"], alpha=0.3, lw=0, **st.RT[lab])
+        line, = axs[0].plot(x, r[f"clouds_{lab}"], lw=1.8, marker="o", ms=4, label=lab, **st.RT[lab])
+        h.append(line)
+        axs[1].fill_between(x, l[f"excess_500_{lab}_lo"], l[f"excess_500_{lab}_hi"], alpha=0.3, lw=0, **st.RT[lab])
+        axs[1].plot(x, l[f"excess_500_{lab}"], lw=1.8, marker="o", ms=4, **st.RT[lab])
+    axs[1].axhline(1., color="0.75", lw=0.8, zorder=0)
+    axs[0].set_ylabel(r"cloud births [km$^{-2}$ h$^{-1}$]")
+    axs[1].set_ylabel("births within 500 m of a cloud,\nobserved over random")
+    for k, ax in enumerate(axs):
+        ax.set_xlabel("local solar time [h]")
+        ax.set_xlim(10., 17.)
+        st.apply(ax)
+        st.panel(ax, k)
+    fig.legend(handles=h, ncols=2, loc="outside lower center")
+    return st.savefig(fig, expt, "fig17_births")
