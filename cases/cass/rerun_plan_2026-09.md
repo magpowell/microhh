@@ -763,3 +763,70 @@ every 3D minus 1D domain-mean shortwave number of the production runs.
   restarts were cancelled and resubmitted as two whole-node jobs in the regular QoS, four members each: 1D 59136701
   (20 h), 3D 59136702 (48 h) with chained restart 59136703. Same binary, same folders. Run 3 (59088071) started
   2026-09-30 15:06; run 4 (59088074) stays in the shared QoS.
+
+## 21. Analyses to rerun when the v3 production lands (plan of 2026-10-02)
+
+State: runs 2, 3, 4 complete and checked (coupling pass, residual below 0.6 W/m2 before 24.5 UTC). Run 1 (3D,
+four members, job 59136702, 40 h limit, restart 59136703) pending.
+
+### 0. Groundwork before any rerun (does not need the 3D runs)
+
+- One loader for v3 snapshots: the hourly dumps lack T, qi, u, v; the 60 s fields (`*_hf`, 23700 to 38400 s, to
+  6 km, float32: u, v, w, thl, qt, p) lack ql. Liquid water rebuilt from thl, qt with the base state of the nearest
+  hour matches the dumped ql (358 498 of 358 501 cloudy cells at 28800 s, values to float32 precision, 2026-10-02).
+  So `snapshot.load` reads the 60 s fields and derives T, ql, thv, b; u and v come with them.
+- Times by SOLAR hour, not seconds: v2 snapshots 28800 to 39600 s were solar 11.9 to 14.9; in v3 (origin 12 UTC)
+  the same solar times are 23364 to 34164 s. Replace every `TIMES = (28800, ...)` (composite_summary, dilution,
+  cluster, open_ground, neighbours, figures, depth_w, robust, overshoot, persistence) by solar hours mapped to the
+  nearest 60 s field. The 60 s window covers solar 12.0 to 16.1.
+- Ray tracer runs: surface shortwave for any analysis is `sw_flux_sfc_dir_rt + sw_flux_sfc_dif_rt` (statistics
+  `sw_flux_*` are two-stream). Already done in `cass_analysis`, `check_surface_coupling`, `widening.surface_sw`.
+- Expt name `no_aerosols_zero_wind_v3`; result folders separate from v2.
+- 3D tracking (`track3d.py`, new): test on 1D member 1 is job 59209403; to check before use: object counts against the
+  2D tracker, the longest tracks and their merge and split counts (lesson of 2026-09-28), lifetime of untouched
+  objects against the 2D value (6.5 to 7 min).
+
+### 1. Checks, as each run lands
+
+- `check_surface_coupling.py` per member and per segment (3D: ray-traced net radiation, restart segment); `check_finite`.
+- Domain means 1D against 3D (cover, LWP, base, top, surface fluxes, shortwave received), with the clear-sky offset
+  now gone: the 3D minus 1D surface shortwave before the first cloud must be about zero.
+
+### 2. Benchmark chain (needs only runs 2 to 4; can start now)
+
+- Run 4 against the published CASS results (reference data to be located; not on disk yet).
+- Run 3 against 4 (interactive land vs prescribed fluxes, CASS winds), 2 against 3 (winds), then 1 against 2.
+
+### 3. Characterize pipeline on v3 (all need run 1)
+
+Order chosen so the headline statements come first.
+
+| Order | Analysis | Scripts | Figure |
+|---|---|---|---|
+| a | Mean state, cloud base, core, root width, entrainment, activation | snapshot, parcel, activation, collect | 1, 4, 5 |
+| b | Population: number against area at fixed cover; births, location, fate; suppression on open ground; merges | width_gap (arithmetic), births, merges, suppression | 17, 19 |
+| c | Width and depth: depth-width, dilution, persistence, widening regression, width gap | cloud_w, depth_w, dilution, persistence, widening, width_gap | 10, 15, 16, 18 |
+| d | Composites and forces: circulation under clouds, pressure split, root work | composite, composite_summary, pressure, updraft_budget, roots | 6, 7 |
+| e | Open ground: divergence, subsidence, barrier | open_ground | |
+| f | Timing, tracking, overshoot, clustering, neighbours | timing, track, lifetime, overshoot, cluster, segment, robust, neighbours | 8, 9, 11 to 14 |
+| g | Layer budget from tendencies | budget | |
+
+### 4. New with v3 only (60 s fields)
+
+- Pressure split checked against the saved model pressure `p` (v2 had only the masked statistics).
+- Buoyancy-pressure force at low level composited around clouds over the surface shortwave anomaly: the catchment
+  as a computed object, and the outflow from shaded open ground (Jeevanjee and Romps 2016, doi:10.1002/qj.2683).
+- Low-level divergence over open ground every 60 s from u and v at 100 m (cross-sections) and the 60 s fields:
+  hypothesis A of the third effect, followed in time rather than at four snapshots.
+- Barrier to initiation (surface parcel against the cloud-base level) every minute against the births on open ground.
+- 3D cloud lifetimes, depth histories and pulses on persistent sites (`track3d.py`): replaces the withdrawn 2D lifetimes.
+
+### 5. Not rerun
+
+- Shortwave-matched run and every v2 3D number affected by the water vapour error; v2 results are not for publication.
+- User notebooks: not edited; their loaders already take the lowest cross-section level and the ray-traced fluxes.
+
+### 6. After the analyses
+
+Tape archive of v3 (statistics, 60 s fields, cross-sections, restart files at the analysis times) before the 8-week
+scratch purge; then delete from scratch.
