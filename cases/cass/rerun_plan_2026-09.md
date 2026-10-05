@@ -782,9 +782,16 @@ four members, job 59136702, 40 h limit, restart 59136703) pending.
 - Ray tracer runs: surface shortwave for any analysis is `sw_flux_sfc_dir_rt + sw_flux_sfc_dif_rt` (statistics
   `sw_flux_*` are two-stream). Already done in `cass_analysis`, `check_surface_coupling`, `widening.surface_sw`.
 - Expt name `no_aerosols_zero_wind_v3`; result folders separate from v2.
-- 3D tracking (`track3d.py`, new): test on 1D member 1 is job 59209403; to check before use: object counts against the
-  2D tracker, the longest tracks and their merge and split counts (lesson of 2026-09-28), lifetime of untouched
-  objects against the 2D value (6.5 to 7 min).
+- 3D tracking (`track3d.py`): tested on 1D member 1 (job 59209403, 18 min). Untouched clouds of at least 16 cells
+  live 6.3 min (p99 12, max 16), as in 2D; every track longer than 20 min has merges and splits (the longest shed
+  100 to 235 pieces). Overlap tracking in 3D is still a site tracker. The lifetime of active clouds needs a core-based
+  identity that survives splits of the shell; not available yet.
+- Run 1 landed 2026-10-05 (job 59136702, 31.8 h, no restart). All ten runs checked: coupling passes, residuals below
+  0.6 (1D) and 1.7 W/m2 (3D) before 24.5 UTC. The clear-sky offset is gone (3D minus 1D surface shortwave
+  -0.3 to +0.6 W/m2 at 13 to 16 UTC). 16 to 23 UTC means, four members each: cover 0.117 in both; LWP 6.54 (1D)
+  and 8.06 g/m2 (3D), ratio 1.23; cloud base 1435 and 1445 m; highest top 3331 and 3875 m; H 107.7 and 109.4,
+  LE 344.6 and 345.8 W/m2. The LWP ratio is smaller than in v2 (about 1.4); 3D LWP is equal or lower until
+  19 UTC (solar 12.4) and diverges after (ratio 1.74 at 22 UTC).
 
 ### 1. Checks, as each run lands
 
