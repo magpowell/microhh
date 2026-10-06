@@ -56,7 +56,7 @@ def load(run, t):
         f = {v: np.asarray(run.field_hf(v, t), dtype=float) for v in ("thl", "qt", "w", "u", "v", "p")}
     else:
         f = {v: np.asarray(run.field(v, t), dtype=float) for v in ("thl", "qt", "w")}
-        for v in ("T", "ql", "qi"):
+        for v in ("T", "ql", "qi", "u", "v", "b", "p"):
             if (run.dir / f"{v}.{int(t):07d}").exists():
                 f[v] = np.asarray(run.field(v, t), dtype=float)
     nz = f["thl"].shape[0]
@@ -66,6 +66,7 @@ def load(run, t):
     if not all(v in f for v in ("T", "ql", "qi")):
         a = th.sat_adjust(f["thl"], f["qt"], bs["pref"][k3], bs["exnref"][k3])
         f["T"], f["ql"], f["qi"] = a["T"], a["ql"], a["qi"]
+    f["wh"] = f["w"]                       # half levels, as on disk
     f["w"] = mk.w_to_full(f["w"])
     f["qv"] = f["qt"] - f["ql"] - f["qi"]
     f["qc"] = f["ql"] + f["qi"]

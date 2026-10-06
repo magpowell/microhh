@@ -15,7 +15,7 @@ import masks as mk
 import pressure as pr
 import thermo as th
 from les_io import Run, eqtime_h, lowest
-from snapshot import out_path, run_dir, snapshot_times
+from snapshot import load, out_path, run_dir, snapshot_times
 
 IZB = 2                                   # cloud-base threshold 1e-3
 XL = np.linspace(-1., 1., 200)
@@ -54,17 +54,20 @@ def line_run(on, i0):
     return a, b - a + 1
 
 
-def forces(run, t, kb, kc):
-    nz = run.ktot
+def forces(run, f, bs, kb, kc):
+    """Buoyancy anomaly, winds and the accelerations from the buoyancy and dynamic pressure on levels 0..kc.
+    Fields that stop below the model top (the 60 s fields end at 6 km) are continued with zero forcing to the top, so
+    the pressure is solved with the lid at the real top."""
+    nz, nf = f["thl"].shape[0], run.ktot_full
     dz = run.z[1] - run.z[0]
     rr = np.fromfile(run.dir / "rhoref.0000000", dtype="<f8")
-    rho, rhoh = rr[:nz], rr[nz:]
-    u = np.array(run.field("u", t), dtype=float)
-    v = np.array(run.field("v", t), dtype=float)
-    w = np.zeros((nz + 1, run.jtot, run.itot))
-    w[:nz] = run.field("w", t)
-    b = np.array(run.field("b", t), dtype=float)
-    b -= b.mean(axis=(1, 2), keepdims=True)
+    rho, rhoh = rr[:nf], rr[nf:]
+    full = lambda a: np.concatenate([a, np.zeros((nf - a.shape[0],) + a.shape[1:])]) if a.shape[0] < nf else np.asarray(a, dtype=float)
+    u, v = full(f["u"]), full(f["v"])
+    w = np.zeros((nf + 1, run.jtot, run.itot))
+    w[:nz] = f["wh"]
+    b = f["b"] if "b" in f else th.grav * (f["thv"] - f["thv"].mean(axis=(1, 2), keepdims=True)) / bs["thvref"][:, None, None]
+    b = full(b - b.mean(axis=(1, 2), keepdims=True))
     sl = slice(0, kc + 1)
     out = dict(b=b[sl].copy(), w=pr.half_to_full(w)[sl],
                uc=0.5 * (u + np.roll(u, -1, axis=2))[sl], vc=0.5 * (v + np.roll(v, -1, axis=1))[sl])
@@ -79,18 +82,18 @@ def forces(run, t, kb, kc):
     pib = pr.project(None, None, pr.full_to_half(b), rho, rhoh, run.dx, run.dy, dz)
     out["a_pb"] = vert(pib)
     out["hbx"], out["hby"] = horiz(pib)
-    bs = b.copy()
-    bs[kb:] = 0.
-    out["a_pb_sub"] = vert(pr.project(None, None, pr.full_to_half(bs), rho, rhoh, run.dx, run.dy, dz))
+    bsub = b.copy()
+    bsub[kb:] = 0.
+    out["a_pb_sub"] = vert(pr.project(None, None, pr.full_to_half(bsub), rho, rhoh, run.dx, run.dy, dz))
     out["a_pb_cld"] = out["a_pb"] - out["a_pb_sub"]
-    del pib, bs, b
+    del pib, bsub, b
     Tu, Tv, Tw = pr.advection(u, v, w, rho, rhoh, run.dx, run.dy, dz)
     del u, v
     pid = pr.project(Tu, Tv, Tw, rho, rhoh, run.dx, run.dy, dz)
     del Tu, Tv, Tw
     out["a_pd"] = vert(pid)
     out["hdx"], out["hdy"] = horiz(pid)
-    return out, w
+    return out, w[:nz + 1]
 
 
 def cloud_table(run, qc, w_full, thv, labels, n):
@@ -120,18 +123,14 @@ def analyse(expt, rt, rep, t):
     az, zen = solar_azimuth(run, t)
     e = dict(parallel=(-np.sin(az), -np.cos(az)), perpendicular=(np.cos(az), -np.sin(az)))
 
-    F, wh = forces(run, t, kb, kc)
-    bs = run.basestate(t)
-    k3 = (slice(None), None, None)
-    qc = np.asarray(run.field("ql", t), dtype=float) + np.asarray(run.field("qi", t), dtype=float)
-    thl = np.asarray(run.field("thl", t), dtype=float)
-    qt = np.asarray(run.field("qt", t), dtype=float)
-    thv = th.theta_v(thl, qt, np.asarray(run.field("ql", t)), np.asarray(run.field("qi", t)), bs["exnref"][k3])
+    f, bs = load(run, t)
+    F, wh = forces(run, f, bs, kb, kc)
+    qc, thl, qt, thv = f["qc"], f["thl"], f["qt"], f["thv"]
     F["qt"] = (qt - qt.mean(axis=(1, 2), keepdims=True))[:kc + 1]
     F["thl"] = (thl - thl.mean(axis=(1, 2), keepdims=True))[:kc + 1]
     labels, n = mk.label_periodic(qc.max(axis=0) > 0.)
-    tab = cloud_table(run, qc, pr.half_to_full(wh), thv, labels, n)
-    del thl, qt, thv, qc, wh
+    tab = cloud_table(run, qc, f["w"], thv, labels, n)
+    del f, thl, qt, thv, qc, wh
     cen = mk.periodic_centroids(labels, n, run.dx, run.dy)
 
     it = int(round(t / 60.))
