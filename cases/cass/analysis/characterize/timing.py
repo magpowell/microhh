@@ -13,7 +13,6 @@ from les_io import Run
 from snapshot import out_path, run_dir
 
 RTS = ("2stream", "raytracer")
-SEGMENTS = ("0000000", "0043200")
 SMOOTH = 7                       # 5-min samples in the centred running mean
 HOLD = 6                         # consecutive samples beyond K standard errors
 K = 2.
@@ -24,15 +23,27 @@ FILL = 1.e30
 
 def _keep(rd, mask, seg):
     """The first segment can run past the restart time; the restarted segment replaces that part."""
+    segs = segments(rd, mask)
     with xr.open_dataset(rd / f"cass.{mask}.{seg}.nc", decode_times=False) as r:
         t = r["time"].values
     t = np.round(t)
-    return t, (t <= float(SEGMENTS[1])) if seg == SEGMENTS[0] else (t > float(SEGMENTS[1]))
+    i = segs.index(seg)
+    keep = np.ones(t.size, dtype=bool)
+    if i + 1 < len(segs):
+        keep &= t <= float(segs[i + 1])
+    if i > 0:
+        keep &= t > float(seg)
+    return t, keep
+
+
+def segments(rd, mask="default"):
+    """Statistics segments of a run (start time as in the file name), in order."""
+    return sorted(f.name.split(".")[-2] for f in rd.glob(f"cass.{mask}.*.nc") if f.name.count(".") == 3)
 
 
 def _read(rd, mask, group, var):
     a = []
-    for seg in SEGMENTS:
+    for seg in segments(rd, mask):
         with xr.open_dataset(rd / f"cass.{mask}.{seg}.nc", group=group, decode_times=False) as g:
             a.append(g[var].values[_keep(rd, mask, seg)[1]])
     a = np.concatenate(a)
@@ -42,7 +53,7 @@ def _read(rd, mask, group, var):
 def statistics(expt, rt, rep):
     rd = run_dir(expt, rt, rep)
     run = Run(rd)
-    time = np.concatenate([t[k] for t, k in (_keep(rd, "default", s) for s in SEGMENTS)])
+    time = np.concatenate([t[k] for t, k in (_keep(rd, "default", s) for s in segments(rd))])
     a = np.nan_to_num(_read(rd, "ql", "default", "area"))
     out = xr.Dataset(coords=dict(time=time, z=run.z))
     for v in ("qt", "thl"):

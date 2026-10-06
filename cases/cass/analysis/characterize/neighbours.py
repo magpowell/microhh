@@ -50,7 +50,7 @@ def side_counts(xs, ys):
 def fields(run, t):
     """Surface and low-level fields on the cell centres."""
     it = int(round(t / 60.))
-    bs = run.basestate(t)
+    bs = run.basestate_at(t)
     S = {}
     with xr.open_dataset(run.dir / "thl_fluxbot.xy.nc", decode_times=False) as d:
         S["H"] = np.squeeze(d["thl_fluxbot"].isel(time=it).values).astype(float) * bs["rhoref"][0] * th.cp
@@ -59,9 +59,15 @@ def fields(run, t):
     for f in (rtsw if all(x.exists() for x in rtsw) else [run.dir / "sw_flux_dn.xy.nc"]):
         with xr.open_dataset(f, decode_times=False) as d:
             S["sw"] = S["sw"] + lowest(d[list(d.data_vars)[0]].isel(time=it))
-    b = np.array(run.field("b", t)[:2], dtype=float)
+    if run.has_hf(t):       # 60 s fields: buoyancy from thl and qt (no cloud water at these levels), winds from the files
+        thl, qt = (np.array(run.field_hf(n, t)[:2], dtype=float) for n in ("thl", "qt"))
+        thv = th.theta_v(thl, qt, 0., 0., bs["exnref"][:2, None, None])
+        b = th.grav * (thv - thv.mean(axis=(1, 2), keepdims=True)) / bs["thvref"][:2, None, None]
+        u, v = (np.array(run.field_hf(n, t)[:NLOW], dtype=float) for n in ("u", "v"))
+    else:
+        b = np.array(run.field("b", t)[:2], dtype=float)
+        u, v = (np.array(run.field(n, t)[:NLOW], dtype=float) for n in ("u", "v"))
     S["b"] = (b - b.mean(axis=(1, 2), keepdims=True)).mean(axis=0)
-    u, v = (np.array(run.field(n, t)[:NLOW], dtype=float) for n in ("u", "v"))
     S["conv"] = -((np.roll(u, -1, axis=2) - u) / run.dx + (np.roll(v, -1, axis=1) - v) / run.dy).mean(axis=0)
     return S
 

@@ -84,9 +84,10 @@ def figure4(expt, izb=0):
 
 def figure5(expt, izb=2):
     """Active fraction of cloud-base cloudy-updraft parcels against a uniform boost in w and in h."""
-    fig, axs = plt.subplots(2, 3, figsize=(9., 5.6), sharey=True, constrained_layout=True)
+    times = snapshot_times(expt, skip_first=True)
+    fig, axs = plt.subplots(2, len(times), figsize=(3. * len(times), 5.6), sharey=True, constrained_layout=True)
     h = []
-    for k, t in enumerate(snapshot_times(expt, skip_first=True)):
+    for k, t in enumerate(times):
         for rt, lab in RTS:
             act = [a.isel(zb_thr=izb).sel(start="cu", kind="entraining") for a in load(expt, "activation", rt, t)]
             fw = np.array([a["f_active_dw"].values for a in act])
