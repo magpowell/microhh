@@ -147,9 +147,41 @@ def figure_map(expt, rep=None, solar=14.5, vmax=200.):
     return st.savefig(fig, expt, "fig_systems_map")
 
 
+def figure_pdfs(expt, hours=((12., 13.), (13., 14.), (14., 15.), (15., 16.)), nbins=9):
+    """Distributions of multipulse system lifetime and of pulses per multipulse system by hour of the system's birth;
+    density per decade on logarithmic bins, member min-max."""
+    M = members(expt)
+    rows = (("life", "multipulse system lifetime [min]", np.logspace(np.log10(4.), np.log10(400.), nbins + 1)),
+            ("n_pulses", "pulses per multipulse system [-]", np.logspace(np.log10(2.), np.log10(300.), nbins + 1)))
+    fig, axs = plt.subplots(2, len(hours), figsize=(3. * len(hours), 5.6), sharey="row", sharex="row", layout="constrained")
+    for i, (v, name, edges) in enumerate(rows):
+        x = np.sqrt(edges[:-1] * edges[1:])
+        for j, (h0, h1) in enumerate(hours):
+            ax, h = axs[i, j], []
+            for lab in ("1D", "3D"):
+                pm, med = [], []
+                for rep in range(1, 5):
+                    y = M[(lab, rep)][1]
+                    d = y[~y.cut & (y.kind == "multipulse") & (y.lst >= h0) & (y.lst < h1)][v].values
+                    pm.append(np.histogram(d, bins=edges)[0] / max(d.size, 1) / np.diff(np.log10(edges)))
+                    med.append(np.median(d))
+                pm = np.array(pm)
+                ax.fill_between(x, pm.min(axis=0), pm.max(axis=0), alpha=0.25, lw=0, **st.RT[lab])
+                h.append(ax.plot(x, pm.mean(axis=0), lw=1.8, label=lab, **st.RT[lab])[0])
+                ax.axvline(np.mean(med), lw=1., ls="--", **st.RT[lab])
+            ax.set_xscale("log")
+            ax.set_xlabel(name)
+            st.apply(ax)
+            st.panel(ax, i * len(hours) + j, f"{h0:.0f}-{h1:.0f} LT" if i == 0 else "")
+        axs[i, 0].set_ylabel("probability density per decade [-]")
+        axs[i, 0].set_ylim(bottom=0.)
+    fig.legend(handles=h, ncols=2, loc="outside lower center")
+    return st.savefig(fig, expt, "fig_systems_pdfs")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v3")
     a = ap.parse_args()
-    for fn in (figure_bars, figure_series, figure_map):
+    for fn in (figure_bars, figure_series, figure_map, figure_pdfs):
         print(fn(a.expt))
