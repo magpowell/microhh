@@ -153,62 +153,31 @@ def load_hist(expt):
 
 
 def figure4h(expt, xmax=7.):
-    """Cloud-base updraft speed distributions pooled over each hour of the 60 s fields, with the hourly mean w_crit."""
+    """Core updraft speed distributions at cloud base pooled over each hour of the 60 s fields; member min-max."""
     import style as st
     from style import plt
     H = load_hist(expt)
     edges = W_BINS
     x = 0.5 * (edges[:-1] + edges[1:])
-    fig, axs = plt.subplots(1, len(HOURS), figsize=(3. * len(HOURS), 3.4), sharey=True, layout="constrained")
+    fig, axs = plt.subplots(1, len(HOURS), figsize=(3. * len(HOURS), 3.2), sharey=True, layout="constrained")
     for k, ((h0, h1), ax) in enumerate(zip(HOURS, axs)):
         h = []
         for rt, lab in zip(RTS, ("1D", "3D")):
-            for tag, ls, name in (("core", "-", "core"), ("cu", "--", "cloudy updraft")):
-                pm = []
-                for rep in range(1, 5):
-                    d = H[(rt, rep)]
-                    w = (d.lst >= h0) & (d.lst < h1)
-                    c = d[f"hist_{tag}"].values[w.values].sum(axis=0)
-                    pm.append(c / max(c.sum(), 1) / np.diff(edges))
-                pm = np.array(pm)
-                ax.fill_between(x, pm.min(axis=0), pm.max(axis=0), alpha=0.2, lw=0, **st.RT[lab])
-                h.append(ax.plot(x, pm.mean(axis=0), ls=ls, lw=1.8, label=f"{lab} {name}", **st.RT[lab])[0])
-            wc = np.array([float(H[(rt, rep)].wcrit_entraining.where((H[(rt, rep)].lst >= h0) & (H[(rt, rep)].lst < h1)).mean()) for rep in range(1, 5)])
-            ax.axvspan(wc.min(), wc.max(), alpha=0.2, lw=0, **st.RT[lab])
-            h.append(ax.axvline(wc.mean(), lw=1.2, ls="-.", label=f"{lab} " + r"$w_{crit}$", **st.RT[lab]))
-        ax.set(xlim=(0., xmax), xlabel=r"vertical velocity at cloud base [m s$^{-1}$]")
+            pm = []
+            for rep in range(1, 5):
+                d = H[(rt, rep)]
+                c = d["hist_core"].values[((d.lst >= h0) & (d.lst < h1)).values].sum(axis=0)
+                pm.append(c / max(c.sum(), 1) / np.diff(edges))
+            pm = np.array(pm)
+            ax.fill_between(x, pm.min(axis=0), pm.max(axis=0), alpha=0.25, lw=0, **st.RT[lab])
+            h.append(ax.plot(x, pm.mean(axis=0), lw=1.8, label=lab, **st.RT[lab])[0])
+        ax.set(xlim=(0., xmax), xlabel=r"core vertical velocity at cloud base [m s$^{-1}$]")
         st.apply(ax)
         st.panel(ax, k, f"{h0:.0f}-{h1:.0f} LT")
     axs[0].set_ylabel(r"probability density [s m$^{-1}$]")
     axs[0].set_ylim(bottom=0.)
-    fig.legend(handles=h, ncols=6, loc="outside lower center", columnspacing=1.2)
-    return st.savefig(fig, expt, "fig4_w_pdf_hourly")
-
-
-def figure20(expt):
-    import style as st
-    from style import plt
-    d = load_all(expt)
-    panels = (("zb", "cloud base [m]"), ("w_core", r"core updraft at cloud base [m s$^{-1}$]"), ("a_core", "core area fraction at cloud base [-]"),
-              ("M_core", r"core mass flux at cloud base [kg m$^{-2}$ s$^{-1}$]"), ("thv_root_50", r"root $\theta_v$ anomaly at 0.5 $z_b$ [K]"),
-              ("cin_entraining", r"barrier of the cloudy updraft [J kg$^{-1}$]"))
-    fig, axs = plt.subplots(2, 3, figsize=(10.5, 6.2), sharex=True, layout="constrained")
-    h = []
-    for k, ((v, lab), ax) in enumerate(zip(panels, axs.ravel())):
-        for rt, name in zip(RTS, ("1D", "3D")):
-            c = d[d.rt == rt].pivot(index="t", columns="rep", values=v)
-            x = d[d.rt == rt].groupby("t").lst.first().reindex(c.index).values
-            ax.fill_between(x, c.min(axis=1), c.max(axis=1), alpha=0.25, lw=0, **st.RT[name])
-            l, = ax.plot(x, c.mean(axis=1), lw=1.6, label=name, **st.RT[name])
-            if k == 0:
-                h.append(l)
-        ax.set_ylabel(lab)
-        st.apply(ax)
-        st.panel(ax, k)
-        if k >= 3:
-            ax.set_xlabel("local solar time [h]")
     fig.legend(handles=h, ncols=2, loc="outside lower center")
-    return st.savefig(fig, expt, "fig20_cloudbase_series")
+    return st.savefig(fig, expt, "fig4_w_pdf_hourly")
 
 
 if __name__ == "__main__":
@@ -226,7 +195,6 @@ if __name__ == "__main__":
         show = ["hour"] + [f"{v}_{k}" for v in ("zb", "w_core", "a_core", "M_core", "thv_root_50", "cin_entraining") for k in ("1D", "3D", "ratio")]
         print("--- hourly means, 1D, 3D and 3D over 1D")
         print(h[show].to_string(index=False, float_format=lambda v: f"{v:.3g}"))
-        print(figure20(a.expt))
         print(figure4h(a.expt))
     else:
         analyse(a.expt, a.rt, a.rep, a.every, a.solar)

@@ -135,16 +135,17 @@ def tables(expt, rt, rep, thr=0.):
     return p, s, tc
 
 
-def systems(p, tc, dx, dy):
+def systems(p, tc, dx, dy, keep_cut=False):
     """One row per cloud system (all clouds connected in space and time): lifetime, widest cloud, pulses, class."""
     g = tc.groupby("family")
     y = pd.DataFrame(dict(life=g.family_lifetime.first() / 60., D=mk.equivalent_diameter(g.area_max.max().values / (dx * dy), dx, dy), lst=g.lst_first.min(),
+                          f0=g.frame_first.min(), f1=g.frame_last.max(),
                           cut=g.birth.agg(lambda b: (b == "start").any()) | g.death.agg(lambda d: (d == "end").any())))
     pg = p.groupby("family")
     y = y.join(pd.DataFrame(dict(n_pulses=pg.size(), pulse_mean=pg.frames.mean(), pulse_max=pg.frames.max())))
     y["n_pulses"] = y.n_pulses.fillna(0).astype(int)
     y["kind"] = np.select([y.n_pulses == 0, y.n_pulses == 1], ["passive", "single pulse"], "multipulse")
-    return y[~y.cut]
+    return y if keep_cut else y[~y.cut]
 
 
 def systems_summary(expt, thr):

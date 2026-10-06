@@ -75,28 +75,6 @@ def arithmetic(expt, min_area=MIN_AREA):
     return m, out.reset_index()
 
 
-def figure19(expt, m):
-    import style as st
-    from style import plt
-    fig, ax = plt.subplots(figsize=(4.6, 3.8), constrained_layout=True)
-    h = []
-    sel = m[(m.lst >= 12.) & (m.lst < 16.)]
-    for rt, lab in zip(RTS, ("1D", "3D")):
-        c = sel[sel.rt == rt]
-        l = ax.scatter(c.mean_area / 1.e6, c.n, s=6, alpha=0.3, lw=0, rasterized=True, label=lab, **st.RT[lab])
-        h.append(l)
-    a = np.array([0.1, 3.])
-    dom = Run(run_dir(expt, RTS[0], 1))
-    for cov in (0.05, 0.1, 0.2):
-        ax.plot(a, cov * dom.xsize * dom.ysize / 1.e6 / a, color="0.6", lw=0.8, ls="--")
-        ax.text(a[-1], cov * dom.xsize * dom.ysize / 1.e6 / a[-1], f" {cov:.2f}", fontsize=7, color="0.4", va="center")
-    ax.set_xscale("log"); ax.set_yscale("log")
-    ax.set_xlabel(r"mean cloud area [km$^2$]"); ax.set_ylabel("number of clouds")
-    st.apply(ax)
-    ax.legend(handles=h, ncols=2, loc="upper center", bbox_to_anchor=(0.5, -0.18))
-    return st.savefig(fig, expt, "fig19_number_area")
-
-
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
@@ -113,4 +91,3 @@ if __name__ == "__main__":
     ar.to_csv(res / "arithmetic.csv", index=False)
     print("\n--- arithmetic by hour: cover (member mean and range), number, mean area, and their 3D over 1D ratios")
     print(ar.to_string(index=False, float_format=fmt))
-    print(figure19(a.expt, m))

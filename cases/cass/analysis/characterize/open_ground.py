@@ -164,33 +164,6 @@ def series(expt):
     return d, out
 
 
-def figure21(expt):
-    import style as st
-    from style import plt
-    d = load_series(expt)
-    lit = d[d.cls == "open_lit"]
-    panels = (("b_lcl", r"parcel $\theta_v$ deficit at its LCL [K]"), ("div_h", r"mass divergence below 200 m [kg m$^{-3}$ s$^{-1}$]"),
-              ("w05", r"w at 0.5 $z_b$ [m s$^{-1}$]"), ("qt_up", r"$q_t$ anomaly, upper subcloud [g kg$^{-1}$]"))
-    fig, axs = plt.subplots(2, 2, figsize=(8.4, 5.8), sharex=True, layout="constrained")
-    h = []
-    for k, ((v, lab), ax) in enumerate(zip(panels, axs.ravel())):
-        for rt, name in zip(RTS, ("1D", "3D")):
-            c = lit[lit.rt == rt].pivot_table(index="t", columns="rep", values=v)
-            x = lit[lit.rt == rt].groupby("t").lst.first().reindex(c.index).values
-            ax.fill_between(x, c.min(axis=1), c.max(axis=1), alpha=0.25, lw=0, **st.RT[name])
-            l, = ax.plot(x, c.mean(axis=1), lw=1.6, label=name, **st.RT[name])
-            if k == 0:
-                h.append(l)
-        ax.set_ylabel(lab)
-        st.zero_line(ax)
-        st.apply(ax)
-        st.panel(ax, k)
-        if k >= 2:
-            ax.set_xlabel("local solar time [h]")
-    fig.legend(handles=h, ncols=2, loc="outside lower center")
-    return st.savefig(fig, expt, "fig21_open_ground_series")
-
-
 def summary(expt):
     d = load(expt)
     res = out_path(expt, "2stream", 1, 0).parents[2]
@@ -225,7 +198,6 @@ if __name__ == "__main__":
     if a.series:
         d, o = series(a.expt)
         print(o.to_string(float_format=lambda v: f"{v:.3g}"))
-        print(figure21(a.expt))
         raise SystemExit
     pd.set_option("display.width", 250); pd.set_option("display.max_columns", 80); pd.set_option("display.max_rows", 200)
     fmt = lambda v: f"{v:.3g}"
