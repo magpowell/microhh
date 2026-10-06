@@ -48,6 +48,7 @@ class Run:
             raise ValueError(f"grid.0000000 has {raw.size} values, expected {sum(n)}")
         self.x, self.xh, self.y, self.yh, self.z, zh = np.split(raw, np.cumsum(n)[:-1])
         self.zh = np.append(zh, self.zsize)
+        self.ktot_full = self.ktot
 
     @property
     def shape(self):
@@ -62,12 +63,42 @@ class Run:
 
     def basestate(self, t):
         raw = np.fromfile(self.dir / f"thermo_basestate.{int(t):07d}", dtype="<f8")
-        k = self.ktot
+        k = self.ktot_full
         names = ("thl0", "qt0", "thvref", "thvrefh", "pref", "prefh", "exnref", "exnrefh", "rhoref", "rhorefh")
         n = (k, k, k, k + 1, k, k + 1, k, k + 1, k, k + 1)
         if raw.size != sum(n):
             raise ValueError(f"thermo_basestate has {raw.size} values, expected {sum(n)}")
         return dict(zip(names, np.split(raw, np.cumsum(n)[:-1])))
+
+    def restrict(self, nz):
+        """Keep the lowest nz levels (the 60 s fields stop at hf_zmax)."""
+        if nz < self.ktot:
+            self.ktot, self.z, self.zh = nz, self.z[:nz], self.zh[:nz + 1]
+
+    def has_hf(self, t):
+        return (self.dir / f"thl_hf.{int(t):07d}").exists()
+
+    def field_hf(self, var, t):
+        """60 s field (float32, levels up to hf_zmax)."""
+        f = self.dir / f"{var}_hf.{int(t):07d}"
+        nz = f.stat().st_size // (4 * self.jtot * self.itot)
+        return np.memmap(f, dtype="<f4", mode="r", shape=(nz, self.jtot, self.itot))
+
+    def hf_times(self):
+        return sorted(int(p.name.split(".")[-1]) for p in self.dir.glob("thl_hf.*"))
+
+    def dump_times(self):
+        return sorted(int(p.suffix[1:]) for p in self.dir.glob("thl.*") if p.name.count(".") == 1 and p.suffix[1:].isdigit())
+
+    def basestate_at(self, t):
+        """Base state at t: the hourly file, or linear in time between the two bracketing hourly files."""
+        t = int(t)
+        h0 = (t // 3600) * 3600
+        if t == h0 or not (self.dir / f"thermo_basestate.{h0 + 3600:07d}").exists():
+            return self.basestate(h0)
+        a, b = self.basestate(h0), self.basestate(h0 + 3600)
+        w = (t - h0) / 3600.
+        return {k: (1. - w) * a[k] + w * b[k] for k in a}
 
     def lst(self, t):
         """Local apparent solar time [h] at simulation time t [s]."""

@@ -15,7 +15,7 @@ import masks as mk
 import pressure as pr
 import thermo as th
 from les_io import Run, eqtime_h, lowest
-from snapshot import out_path, run_dir
+from snapshot import out_path, run_dir, snapshot_times
 
 IZB = 2                                   # cloud-base threshold 1e-3
 XL = np.linspace(-1., 1., 200)
@@ -209,8 +209,9 @@ if __name__ == "__main__":
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
     ap.add_argument("--rt", required=True, choices=["2stream", "raytracer"])
     ap.add_argument("--rep", type=int, required=True)
-    ap.add_argument("--t", type=int, nargs="+", default=[28800, 32400, 36000, 39600])
+    ap.add_argument("--t", type=int, nargs="+", default=None, help="default: the snapshot times of the run")
     a = ap.parse_args()
+    a.t = a.t or list(snapshot_times(a.expt, a.rt, a.rep, skip_first=False))
     for t in a.t:
         o = analyse(a.expt, a.rt, a.rep, t)
         print(f"{a.rt} rep_{a.rep:02d} t={t} LST={o.attrs['lst_solar']:.2f} zenith={o.attrs['sun_zenith_deg']:.1f} "

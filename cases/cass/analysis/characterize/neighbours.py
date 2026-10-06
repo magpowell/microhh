@@ -17,10 +17,9 @@ from scipy import ndimage
 import thermo as th
 from composite import solar_azimuth
 from les_io import Run, lowest
-from snapshot import out_path, run_dir
+from snapshot import out_path, run_dir, snapshot_times
 
 RTS = ("2stream", "raytracer")
-TIMES = (32400, 36000, 39600)
 LARGE, SMALL = 1000., 500.          # m, equivalent diameter
 R_IN, R_OUT = 0.5, 3.               # in units of D
 G = np.linspace(-3., 3., 61)        # composite grid in units of D
@@ -130,7 +129,7 @@ def ratio(tabs, k, rng=None, n=2000):
 def summary(expt, seed=0):
     rng = np.random.default_rng(seed)
     rows, sides = [], []
-    for t, rt in itertools.product(TIMES, RTS):
+    for t, rt in itertools.product(snapshot_times(expt, skip_first=True), RTS):
         tabs, dens = [], {k: [] for k in POPS}
         for rep in range(1, 5):
             with xr.open_dataset(out_path(expt, rt, rep, t).with_name(f"neighbours_{t:07d}.nc")) as ds:
@@ -160,7 +159,7 @@ if __name__ == "__main__":
     ap.add_argument("--summary-only", action="store_true")
     a = ap.parse_args()
     if not a.summary_only:
-        for t, rt, rep in itertools.product(TIMES, RTS, range(1, 5)):
+        for t, rt, rep in itertools.product(snapshot_times(a.expt, skip_first=True), RTS, range(1, 5)):
             o = analyse(a.expt, rt, rep, t)
             print(f"{rt} rep_{rep:02d} t={t} large clouds={o.attrs['n_large']} shadow offset={o.attrs['shadow_offset_m']:.0f} m", flush=True)
     r, s = summary(a.expt)

@@ -9,9 +9,8 @@ import pandas as pd
 import xarray as xr
 
 import thermo as th
-from snapshot import out_path
+from snapshot import out_path, snapshot_times
 
-TIMES = (28800, 32400, 36000, 39600)
 RTS = ("2stream", "raytracer")
 LAYERS = ((0., 500.), (500., 1000.), (1000., 1500.), (0., 1000.))   # above cloud base
 IZB = 2
@@ -66,8 +65,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
     a = ap.parse_args()
-    d = pd.DataFrame([one(a.expt, rt, rep, t) for t in TIMES for rt in RTS for rep in range(1, 5)])
-    out = out_path(a.expt, "2stream", 1, TIMES[0]).parents[2]
+    d = pd.DataFrame([one(a.expt, rt, rep, t) for t in snapshot_times(a.expt, skip_first=False) for rt in RTS for rep in range(1, 5)])
+    out = out_path(a.expt, "2stream", 1, 0).parents[2]
     d.to_csv(out / "overshoot_long.csv", index=False)
     s = summarise(d)
     s.to_csv(out / "overshoot.csv", index=False)

@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-TIMES = (28800, 32400, 36000, 39600)
 RTS = (("2stream", "1D"), ("raytracer", "3D"))
 BANDS = ((0.05, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0))
 
@@ -85,7 +84,7 @@ def scalars(d):
 
 def main(expt):
     rows = []
-    for t in TIMES:
+    for t in snapshot_times(expt, skip_first=False):
         for rt, lab in RTS:
             for d in load(expt, rt, t):
                 rows += [dict(t=t, lst=d.attrs["lst_solar"], rt=lab, rep=d.attrs["rep"], metric=k, value=v)
@@ -108,8 +107,7 @@ if __name__ == "__main__":
     ap.add_argument("--show", nargs="*", default=[])
     a = ap.parse_args()
     g = main(a.expt)
-    lt = {28800: "11:53", 32400: "12:53", 36000: "13:53", 39600: "14:53"}
     for m in a.show:
         for _, r in g[g.metric == m].sort_values("t").iterrows():
-            print(f"{m:26s} {lt[r.t]}  1D {r.mean_1D:9.3f} ({r.sd_1D:.3f})  3D {r.mean_3D:9.3f} ({r.sd_3D:.3f})  "
+            print(f"{m:26s} {st.lt(r.lst)}  1D {r.mean_1D:9.3f} ({r.sd_1D:.3f})  3D {r.mean_3D:9.3f} ({r.sd_3D:.3f})  "
                   f"diff {r['diff']:+9.3f}  diff/SE {r.diff_over_se:+6.1f}")

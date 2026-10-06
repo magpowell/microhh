@@ -8,7 +8,7 @@ import numpy as np
 import xarray as xr
 
 import thermo as th
-from snapshot import out_path
+from snapshot import out_path, snapshot_times
 
 DZ_OFF = 100.       # layer for eps: z_b + DZ_OFF .. z_t - DZ_OFF
 FRAC_TOP = 1.e-3    # z_t = highest level with core fraction above this
@@ -137,8 +137,9 @@ if __name__ == "__main__":
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
     ap.add_argument("--rt", required=True, choices=["2stream", "raytracer"])
     ap.add_argument("--rep", type=int, required=True)
-    ap.add_argument("--t", type=int, nargs="+", default=[28800, 32400, 36000, 39600])
+    ap.add_argument("--t", type=int, nargs="+", default=None, help="default: the snapshot times of the run")
     a = ap.parse_args()
+    a.t = a.t or list(snapshot_times(a.expt, a.rt, a.rep, skip_first=False))
     for t in a.t:
         src = out_path(a.expt, a.rt, a.rep, t)
         with xr.open_dataset(src) as ds:

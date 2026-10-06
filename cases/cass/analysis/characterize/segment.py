@@ -16,7 +16,7 @@ from skimage.segmentation import watershed
 
 import masks as mk
 from les_io import Run
-from snapshot import load, out_path, run_dir
+from snapshot import load, out_path, run_dir, snapshot_times
 
 IZB = 2
 NLEV = 4            # 100 m: cloud-base layer and cloud-top layer
@@ -139,8 +139,9 @@ if __name__ == "__main__":
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
     ap.add_argument("--rt", required=True, choices=["2stream", "raytracer"])
     ap.add_argument("--rep", type=int, required=True)
-    ap.add_argument("--t", type=int, nargs="+", default=[32400, 36000, 39600])
+    ap.add_argument("--t", type=int, nargs="+", default=None, help="default: the snapshot times of the run")
     a = ap.parse_args()
+    a.t = a.t or list(snapshot_times(a.expt, a.rt, a.rep, skip_first=True))
     for t in a.t:
         d = analyse(a.expt, a.rt, a.rep, t)
         print(f"{a.rt} rep_{a.rep:02d} t={t} objects={d.sizes['obj']} seeds={d.attrs['n_seeds']} sub-clouds={d.sizes['sub']} "

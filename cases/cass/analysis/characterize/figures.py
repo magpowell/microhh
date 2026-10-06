@@ -7,9 +7,9 @@ import numpy as np
 import xarray as xr
 
 import style as st
+from snapshot import snapshot_times
 from style import plt
 
-TIMES = (32400, 36000, 39600)
 RTS = (("2stream", "1D"), ("raytracer", "3D"))
 WB = np.arange(0., 8.01, 0.4)
 
@@ -29,7 +29,7 @@ def band(ax, x, z, horizontal=True, **kw):
 
 def figure1(expt, izb=0):
     fig, axs = plt.subplots(1, 3, figsize=(9., 4.2), sharey=True, constrained_layout=True)
-    for k, (ax, t) in enumerate(zip(axs, TIMES)):
+    for k, (ax, t) in enumerate(zip(axs, snapshot_times(expt, skip_first=True))):
         snap = load(expt, "snap", "2stream", t)
         z = snap[0]["z"].values / 1e3
         h = []
@@ -60,7 +60,7 @@ def pdf(w):
 def figure4(expt, izb=0):
     fig, axs = plt.subplots(1, 3, figsize=(9., 3.4), sharey=True, constrained_layout=True)
     x = 0.5 * (WB[:-1] + WB[1:])
-    for k, (ax, t) in enumerate(zip(axs, TIMES)):
+    for k, (ax, t) in enumerate(zip(axs, snapshot_times(expt, skip_first=True))):
         h = []
         for rt, lab in RTS:
             snap = load(expt, "snap", rt, t)
@@ -86,7 +86,7 @@ def figure5(expt, izb=2):
     """Active fraction of cloud-base cloudy-updraft parcels against a uniform boost in w and in h."""
     fig, axs = plt.subplots(2, 3, figsize=(9., 5.6), sharey=True, constrained_layout=True)
     h = []
-    for k, t in enumerate(TIMES):
+    for k, t in enumerate(snapshot_times(expt, skip_first=True)):
         for rt, lab in RTS:
             act = [a.isel(zb_thr=izb).sel(start="cu", kind="entraining") for a in load(expt, "activation", rt, t)]
             fw = np.array([a["f_active_dw"].values for a in act])
@@ -176,16 +176,17 @@ def figure6(expt, t, vlim=4.e-3):
         st.panel(ax, k)
         k += 1
     fig.legend(handles=h, ncols=2, loc="outside lower center")
-    fig.suptitle(st.lt(3.891 + t / 3600.), x=0.02, ha="left", fontsize=11)
+    fig.suptitle(st.lt(ens(expt, "2stream", t)[1][0].attrs["lst_solar"]), x=0.02, ha="left", fontsize=11)
     return st.savefig(fig, expt, f"fig6_circulation_{int(t):07d}")
 
 
 def figure7(expt, vlim=3.e-3):
     """Forces on the air in the sun-parallel slice, 3D minus 1D, for each snapshot."""
     rows = (("b", "buoyancy"), ("beff", "effective\nbuoyancy"), ("a_pd", "dynamic\npressure force"), ("tot", "sum"))
-    fig, axs = plt.subplots(len(rows), len(TIMES4), figsize=(10.5, 8.2), sharex=True, sharey=True,
+    times = snapshot_times(expt)
+    fig, axs = plt.subplots(len(rows), len(times), figsize=(10.5, 8.2), sharex=True, sharey=True,
                             layout="constrained")
-    for j, t in enumerate(TIMES4):
+    for j, t in enumerate(times):
         d = (ens(expt, "raytracer", t)[0] - ens(expt, "2stream", t)[0]).sel(dir="parallel")
         f = dict(b=d["b"], beff=d["b"] + d["a_pb"], a_pd=d["a_pd"], tot=d["b"] + d["a_pb"] + d["a_pd"])
         for i, (key, lab) in enumerate(rows):
@@ -194,7 +195,7 @@ def figure7(expt, vlim=3.e-3):
             for x in (-0.5, 0.5):
                 ax.axvline(x, color="0.4", lw=0.6, ls="--")
             ax.tick_params(labelsize=8)
-            st.panel(ax, i * len(TIMES4) + j, st.lt(3.891 + t / 3600.) if i == 0 else "")
+            st.panel(ax, i * len(times) + j, st.lt(ens(expt, "2stream", t)[1][0].attrs["lst_solar"]) if i == 0 else "")
             if j == 0:
                 ax.set_ylabel(r"$z / z_b$ [-]")
                 row_label(ax, lab)
@@ -205,7 +206,6 @@ def figure7(expt, vlim=3.e-3):
     return st.savefig(fig, expt, "fig7_forces_3D_minus_1D")
 
 
-TIMES4 = (28800, 32400, 36000, 39600)
 
 
 def _members(ax, x, m, lab):
@@ -278,8 +278,9 @@ def figure9(expt, tag="", window=(12., 15.)):
     return st.savefig(fig, expt, f"fig9_lifetime{tag}")
 
 
-def figure10(expt, times=(36000, 39600), x="w_core_layer", xmax=7.):
+def figure10(expt, times=None, x="w_core_layer", xmax=7.):
     """Cloud depth against core updraft speed at cloud base, one point per cloud."""
+    times = times or snapshot_times(expt)[-2:]
     import depth_w as dw
     d = dw.load(expt, x)
     g, _ = dw.binned(d)
@@ -346,8 +347,9 @@ def figure11(expt, rt="raytracer", rep=1, t=36000, n=3, half=40):
     return st.savefig(fig, expt, "fig11_split_examples")
 
 
-def figure12(expt, times=(36000, 39600)):
+def figure12(expt, times=None):
     """Share of objects holding two or more cores, against object width."""
+    times = times or snapshot_times(expt)[-2:]
     import robust as rb
     o = rb.load(expt, "obj")
     o["wc"] = np.digitize(o.D, rb.WIDTH_CLASSES) - 1
@@ -390,8 +392,9 @@ def figure13(expt):
     return st.savefig(fig, expt, "fig13_organization")
 
 
-def figure14(expt, times=(36000, 39600)):
+def figure14(expt, times=None):
     """Around large clouds, +x away from the sun: surface shortwave, low-level convergence, small-cloud occurrence."""
+    times = times or snapshot_times(expt)[-2:]
     import neighbours as nb
     res = st.outdir(expt).parent
     fig, axs = plt.subplots(3, 2 * len(times), figsize=(3.1 * 2 * len(times), 8.4), constrained_layout=True)
@@ -439,7 +442,7 @@ if __name__ == "__main__":
         print(figure1(a.expt, izb))
         print(figure4(a.expt, izb))
     print(figure5(a.expt, 2))
-    for t in TIMES4:
+    for t in snapshot_times(a.expt):
         print(figure6(a.expt, t))
     print(figure7(a.expt))
     print(figure8(a.expt))
@@ -449,8 +452,9 @@ if __name__ == "__main__":
         print(fn(a.expt))
 
 
-def figure15(expt, times=(36000, 39600), var="qt", mask="core"):
+def figure15(expt, times=None, var="qt", mask="core"):
     """Fractional entrainment of each cloud against its width; member medians per width class with min-max bands."""
+    times = times or snapshot_times(expt)[-2:]
     import dilution as dl
     d = dl.load_clouds(expt, mask)
     e = f"eps_{var}"
@@ -484,8 +488,9 @@ def figure15(expt, times=(36000, 39600), var="qt", mask="core"):
     return st.savefig(fig, expt, f"fig15_dilution_width_{var}" + ("" if mask == "core" else f"_{mask}"))
 
 
-def figure16(expt, times=(36000, 39600)):
+def figure16(expt, times=None):
     """Cloud depth against the persistence of its cloudy site; member medians per duration class with min-max bands."""
+    times = times or snapshot_times(expt)[-2:]
     import persistence as ps
     d = ps.load_clouds(expt)
     fig, axs = plt.subplots(1, len(times), figsize=(4.2 * len(times), 3.8), sharey=True, constrained_layout=True)

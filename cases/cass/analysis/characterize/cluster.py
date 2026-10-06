@@ -16,10 +16,9 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
-from snapshot import out_path
+from snapshot import out_path, snapshot_times
 
 RTS = ("2stream", "raytracer")
-TIMES = (32400, 36000, 39600)
 MIN_D = (0., 500.)
 N_NULL = 50
 
@@ -80,7 +79,7 @@ def ensemble(df, by, cols):
 def main(expt, seed=0):
     rng = np.random.default_rng(seed)
     rows = []
-    for t, rt, rep in itertools.product(TIMES, RTS, range(1, 5)):
+    for t, rt, rep in itertools.product(snapshot_times(expt, skip_first=True), RTS, range(1, 5)):
         with xr.open_dataset(out_path(expt, rt, rep, t).with_name(f"objects_{t:07d}.nc")) as ds:
             lx, ly = ds.sizes["x"] * ds.attrs["dx"], ds.sizes["y"] * ds.attrs["dy"]
             for kind, dmin in itertools.product(("obj", "sub"), MIN_D):

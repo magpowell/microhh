@@ -9,17 +9,16 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from snapshot import out_path
+from snapshot import out_path, snapshot_times
 
 RTS = ("2stream", "raytracer")
-TIMES = (28800, 32400, 36000, 39600)
 W_BINS = np.array([0., 1., 2., 3., 4., 5., 50.])        # m/s
 D_BINS = np.array([0., 400., 800., 1600., 1.e5])        # m, equivalent diameter
 
 
 def load(expt, x="w_core_layer", min_points=4):
     rows = []
-    for t, rt, rep in itertools.product(TIMES, RTS, range(1, 5)):
+    for t, rt, rep in itertools.product(snapshot_times(expt, skip_first=False), RTS, range(1, 5)):
         with xr.open_dataset(out_path(expt, rt, rep, t).with_name(f"cloudw_{t:07d}.nc")) as ds:
             d = ds.to_dataframe()
             lst = float(ds.attrs["lst_solar"])

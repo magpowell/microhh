@@ -14,10 +14,9 @@ import xarray as xr
 from scipy import ndimage, stats
 
 import masks as mk
-from snapshot import out_path, run_dir
+from snapshot import out_path, run_dir, snapshot_times
 
 RTS = ("2stream", "raytracer")
-TIMES = (32400, 36000, 39600)
 MIN_AREA = 4.e4                                            # m2, 16 cells, as in lifetime.py
 D_BINS = np.array([0., 400., 800., 1600., 1.e5])           # m
 DUR_BINS = np.array([0., 5., 10., 20., 40., 1.e4])         # min
@@ -91,7 +90,7 @@ def analyse(expt, rt, rep, t):
 
 def load_clouds(expt, min_area=MIN_AREA):
     rows = []
-    for t, rt, rep in itertools.product(TIMES, RTS, range(1, 5)):
+    for t, rt, rep in itertools.product(snapshot_times(expt, skip_first=True), RTS, range(1, 5)):
         f = out_path(expt, rt, rep, 0).with_name(f"persistence_{t:07d}.nc")
         with xr.open_dataset(f) as ds:
             d = ds.to_dataframe()
@@ -174,9 +173,10 @@ if __name__ == "__main__":
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
     ap.add_argument("--rt", choices=RTS)
     ap.add_argument("--rep", type=int)
-    ap.add_argument("--t", type=int, nargs="+", default=list(TIMES))
+    ap.add_argument("--t", type=int, nargs="+", default=None, help="default: the snapshot times of the run")
     ap.add_argument("--summary", action="store_true")
     a = ap.parse_args()
+    a.t = a.t or (list(snapshot_times(a.expt, a.rt, a.rep, skip_first=True)) if a.rt else None)
     if a.summary:
         d, b, f = summary(a.expt)
         pd.set_option("display.width", 250); pd.set_option("display.max_columns", 80); pd.set_option("display.max_rows", 200)

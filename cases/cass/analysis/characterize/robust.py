@@ -10,10 +10,9 @@ import pandas as pd
 import xarray as xr
 
 import depth_w as dw
-from snapshot import out_path
+from snapshot import out_path, snapshot_times
 
 RTS = ("2stream", "raytracer")
-TIMES = (32400, 36000, 39600)
 MIN_POINTS = 4
 W_BINS = dw.W_BINS
 D_BINS4 = dw.D_BINS
@@ -26,7 +25,7 @@ CASES = (("objects", "obj", False, "cloud_depth"), ("sub-clouds", "sub", False, 
 
 def load(expt, kind):
     rows = []
-    for t, rt, rep in itertools.product(TIMES, RTS, range(1, 5)):
+    for t, rt, rep in itertools.product(snapshot_times(expt, skip_first=True), RTS, range(1, 5)):
         with xr.open_dataset(out_path(expt, rt, rep, t).with_name(f"objects_{t:07d}.nc")) as ds:
             d = ds[[v for v in ds.data_vars if v.startswith(f"{kind}_")]].to_dataframe().rename(columns=lambda c: c[len(kind) + 1:])
             d["t"], d["lst"], d["rt"], d["rep"] = t, float(ds.attrs["lst_solar"]), rt, rep
@@ -90,8 +89,9 @@ def compare(d):
     return pd.DataFrame(rows)
 
 
-def per_member(d, t=39600):
+def per_member(d, t=None):
     rows = []
+    t = d.t.max() if t is None else t
     dt = d[d.t == t]
     for rep in range(1, 5):
         p = dt[dt.rep == rep]

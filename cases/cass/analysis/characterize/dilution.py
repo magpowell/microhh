@@ -15,7 +15,7 @@ from scipy import ndimage
 
 import masks as mk
 from les_io import Run
-from snapshot import load, out_path, run_dir
+from snapshot import load, out_path, run_dir, snapshot_times
 
 IZB = 2
 NLEV = 4            # levels above a cloud's own base forming its base layer (100 m)
@@ -24,7 +24,6 @@ MIN_LEVELS = 8      # levels in the fit (200 m)
 Z_F = 200.          # height above the base at which the mixing fraction is read
 VARS = ("qt", "thl", "h")
 RTS = ("2stream", "raytracer")
-TIMES = (28800, 32400, 36000, 39600)
 D_BINS = np.array([0., 400., 800., 1600., 1.e5])
 
 
@@ -134,7 +133,7 @@ def analyse(expt, rt, rep, t):
 
 def load_clouds(expt, mask="core"):
     rows = []
-    for t, rt, rep in itertools.product(TIMES, RTS, range(1, 5)):
+    for t, rt, rep in itertools.product(snapshot_times(expt, skip_first=False), RTS, range(1, 5)):
         with xr.open_dataset(out_path(expt, rt, rep, t).with_name(f"dilution_{t:07d}.nc")) as ds:
             d = ds.to_dataframe()
             lst = float(ds.attrs["lst_solar"])
@@ -222,10 +221,11 @@ if __name__ == "__main__":
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
     ap.add_argument("--rt", choices=RTS)
     ap.add_argument("--rep", type=int)
-    ap.add_argument("--t", type=int, nargs="+", default=list(TIMES))
+    ap.add_argument("--t", type=int, nargs="+", default=None, help="default: the snapshot times of the run")
     ap.add_argument("--summary", action="store_true")
     ap.add_argument("--mask", default="core", choices=["core", "cu"])
     a = ap.parse_args()
+    a.t = a.t or (list(snapshot_times(a.expt, a.rt, a.rep, skip_first=False)) if a.rt else None)
     if a.summary:
         d, b, f = summary(a.expt, a.mask)
         pd.set_option("display.width", 250); pd.set_option("display.max_columns", 60); pd.set_option("display.max_rows", 200)

@@ -11,7 +11,7 @@ from scipy import ndimage
 
 import masks as mk
 from les_io import Run
-from snapshot import out_path, run_dir
+from snapshot import out_path, run_dir, snapshot_times
 
 IZB = 2                      # cloud-base threshold 1e-3
 Z_LOW = 200.                 # inflow layer depth [m]
@@ -61,9 +61,10 @@ def analyse(args):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
-    ap.add_argument("--t", type=int, nargs="+", default=[28800, 32400, 36000, 39600])
+    ap.add_argument("--t", type=int, nargs="+", default=None, help="default: the snapshot times of the run")
     ap.add_argument("--nproc", type=int, default=4)
     a = ap.parse_args()
+    a.t = a.t or list(snapshot_times(a.expt, a.rt, a.rep, skip_first=False))
     jobs = [(a.expt, rt, rep, t) for t in a.t for rt in ("2stream", "raytracer") for rep in (1, 2, 3, 4)]
     with Pool(a.nproc) as p:
         res = p.map(analyse, jobs)

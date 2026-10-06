@@ -28,10 +28,44 @@ def out_path(expt, rt, rep, t):
             / f"rep_{rep:02d}" / f"snap_{int(t):07d}.nc")
 
 
+SOLAR_HOURS = (11.98, 12.89, 13.89, 14.89, 15.89)
+HALF = ("thvrefh", "prefh", "exnrefh", "rhorefh")
+
+
+def times_for(run, hours=SOLAR_HOURS):
+    """Field times nearest to the solar hours: 60 s fields where they exist, else hourly dumps."""
+    hf, dump = run.hf_times(), run.dump_times()
+    out = []
+    for h in hours:
+        t = (h - float(run.lst(0))) * 3600.
+        pool = hf if hf and hf[0] - 30. <= t <= hf[-1] + 30. else dump
+        out.append(int(min(pool, key=lambda x: abs(x - t))))
+    return out
+
+
+def snapshot_times(expt, rt="2stream", rep=1, skip_first=False):
+    """Times of the snapshot files that exist for a run."""
+    ts = sorted(int(p.stem.split("_")[1]) for p in out_path(expt, rt, rep, 0).parent.glob("snap_*.nc"))
+    return tuple(ts[1:] if skip_first else ts)
+
+
 def load(run, t):
-    f = {v: np.asarray(run.field(v, t), dtype=float) for v in ("T", "ql", "qi", "qt", "thl", "w")}
-    bs = run.basestate(t)
+    """Fields at t from the 60 s fields (thl, qt, w, u, v, p to hf_zmax) or the hourly dumps; T, ql, qi derived when
+    not on disk. The run is restricted to the levels loaded."""
+    if run.has_hf(t):
+        f = {v: np.asarray(run.field_hf(v, t), dtype=float) for v in ("thl", "qt", "w", "u", "v", "p")}
+    else:
+        f = {v: np.asarray(run.field(v, t), dtype=float) for v in ("thl", "qt", "w")}
+        for v in ("T", "ql", "qi"):
+            if (run.dir / f"{v}.{int(t):07d}").exists():
+                f[v] = np.asarray(run.field(v, t), dtype=float)
+    nz = f["thl"].shape[0]
+    run.restrict(nz)
+    bs = {k: v[:nz + 1] if k in HALF else v[:nz] for k, v in run.basestate_at(t).items()}
     k3 = (slice(None), None, None)
+    if not all(v in f for v in ("T", "ql", "qi")):
+        a = th.sat_adjust(f["thl"], f["qt"], bs["pref"][k3], bs["exnref"][k3])
+        f["T"], f["ql"], f["qi"] = a["T"], a["ql"], a["qi"]
     f["w"] = mk.w_to_full(f["w"])
     f["qv"] = f["qt"] - f["ql"] - f["qi"]
     f["qc"] = f["ql"] + f["qi"]
@@ -151,10 +185,11 @@ if __name__ == "__main__":
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
     ap.add_argument("--rt", required=True, choices=["2stream", "raytracer"])
     ap.add_argument("--rep", type=int, required=True)
-    ap.add_argument("--t", type=int, nargs="+", default=[28800, 32400, 36000, 39600])
+    ap.add_argument("--t", type=int, nargs="+", default=None, help="field times [s]; default: the solar hours")
+    ap.add_argument("--solar", type=float, nargs="+", default=list(SOLAR_HOURS))
     ap.add_argument("--ql-thr", type=float, default=0.)
     a = ap.parse_args()
-    for t in a.t:
+    for t in a.t or times_for(Run(run_dir(a.expt, a.rt, a.rep)), a.solar):
         d = analyse(a.expt, a.rt, a.rep, t, a.ql_thr)
         print(f"{a.rt} rep_{a.rep:02d} t={t} LST={d.attrs['lst_solar']:.2f} zb={d['zb'].values} "
               f"n_core_zb={d['n_core_zb'].values} h_core_zb={d['h_core_zb'].values[0]:.1f} "

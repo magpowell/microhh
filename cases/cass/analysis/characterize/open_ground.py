@@ -18,12 +18,11 @@ import xarray as xr
 import masks as mk
 import thermo as th
 from les_io import Run
-from snapshot import out_path, run_dir
+from snapshot import out_path, run_dir, snapshot_times
 from suppression import far_from_cloud, cloud_mask
 from widening import surface_sw
 
 RTS = ("2stream", "raytracer")
-TIMES = (32400, 36000, 39600)
 IZB = 2
 MIN_AREA = 4.e4
 FAR = 500.
@@ -129,7 +128,7 @@ VARS = ("frac", "div_h", "w05", "w09", "thl_sfc", "qt_sfc", "thl_up", "qt_up", "
 
 def load(expt):
     rows = []
-    for t, rt, rep in itertools.product(TIMES, RTS, range(1, 5)):
+    for t, rt, rep in itertools.product(snapshot_times(expt, skip_first=True), RTS, range(1, 5)):
         with xr.open_dataset(out_path(expt, rt, rep, t).with_name(f"open_ground_{t:07d}.nc")) as ds:
             d = ds.to_dataframe().reset_index()
             d["zb"], d["lst"] = float(ds.attrs["zb"]), float(ds.attrs["lst_solar"])
@@ -160,9 +159,10 @@ if __name__ == "__main__":
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
     ap.add_argument("--rt", choices=RTS)
     ap.add_argument("--rep", type=int)
-    ap.add_argument("--t", type=int, nargs="+", default=list(TIMES))
+    ap.add_argument("--t", type=int, nargs="+", default=None, help="default: the snapshot times of the run")
     ap.add_argument("--summary", action="store_true")
     a = ap.parse_args()
+    a.t = a.t or (list(snapshot_times(a.expt, a.rt, a.rep, skip_first=True)) if a.rt else None)
     pd.set_option("display.width", 250); pd.set_option("display.max_columns", 80); pd.set_option("display.max_rows", 200)
     fmt = lambda v: f"{v:.3g}"
     if a.summary:
