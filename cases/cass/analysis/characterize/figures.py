@@ -580,7 +580,7 @@ def figure6_strip(expt, vlim=4.e-3):
         st.zero_line(ax)
         for x in (-0.5, 0.5):
             ax.axvline(x, color="0.4", lw=0.6, ls="--")
-        ax.set(xlim=(-1, 1), ylim=(-60, 25), xlabel=r"$r_\parallel / L$ [-]")
+        ax.set(xlim=(-1, 1), ylim=(-75, 30), xlabel=r"$r_\parallel / L$ [-]")
         ax.tick_params(labelleft=(j == 0), labelsize=8)
         if j == 0:
             ax.set_ylabel("surface SW,\nfrom domain\nmean [%]")
