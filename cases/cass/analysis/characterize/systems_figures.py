@@ -192,7 +192,9 @@ def figure_violins(expt):
     d = pd.concat(d)
     fig, axs = plt.subplots(1, 2, figsize=(6.4, 3.6), layout="constrained")
     for k, ((v, name), ax) in enumerate(zip(rows, axs)):
-        sns.violinplot(data=d, x="rt", y=v, hue="rt", palette={l: st.RT[l]["color"] for l in ("1D", "3D")}, cut=0, legend=False, ax=ax)
+        sns.violinplot(data=d, x="rt", y=v, hue="rt", palette={l: st.RT[l]["color"] for l in ("1D", "3D")}, cut=0, legend=False, saturation=1., ax=ax)
+        for body in ax.collections:
+            body.set(alpha=0.5, edgecolor="none")
         ax.set(xlabel="", ylabel=name, ylim=(0., d[v].quantile(0.98)))
         st.apply(ax)
         st.panel(ax, k)
