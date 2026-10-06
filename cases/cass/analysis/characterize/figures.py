@@ -349,8 +349,9 @@ def _window(a, j0, i0, h):
     return a[np.ix_(np.arange(j0 - h, j0 + h + 1) % a.shape[0], np.arange(i0 - h, i0 + h + 1) % a.shape[1])]
 
 
-def figure11(expt, rt="raytracer", rep=1, t=36000, n=3, half=40):
+def figure11(expt, rt="raytracer", rep=1, t=None, n=3, half=40):
     """Examples of objects before and after splitting: water path with the object outline and the seeds, then sub-clouds."""
+    t = t or snapshot_times(expt)[-2]
     res = st.outdir(expt).parent
     with xr.open_dataset(res / rt / f"rep_{rep:02d}" / f"objects_{t:07d}.nc") as ds:
         ds = ds.load()
