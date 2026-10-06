@@ -543,15 +543,17 @@ def figure17(expt):
     return st.savefig(fig, expt, "fig17_births")
 
 
-def figure18(expt, sw_bins=(-400., -200., -100., -50., 0., 50., 100., 200.), birth_bins=(0, 1, 2, 4, 8, 100)):
-    """Width change over five minutes against the footprint shortwave anomaly and against the births nearby, 1D and 3D."""
+def figure18(expt, sw_bins=(-100., -25., 0., 25., 50., 100., 200., 400., 1000.), birth_bins=(0, 1, 2, 4, 8, 100)):
+    """Width change over five minutes against the shadow moved off the footprint (3D) and against the births nearby, 1D and 3D."""
     import widening as wd
     d = wd.load(expt)
     fig, axs = plt.subplots(1, 2, figsize=(8.4, 3.6), sharey=True, constrained_layout=True)
     h = []
     for rt, lab in RTS:
         c = d[d.rt == rt].copy()
-        for k, (ax, col, bins) in enumerate(((axs[0], "dSW_root", np.array(sw_bins)), (axs[1], "n_births", np.array(birth_bins, dtype=float)))):
+        for k, (ax, col, bins) in enumerate(((axs[0], "dSW_shift", np.array(sw_bins)), (axs[1], "n_births", np.array(birth_bins, dtype=float)))):
+            if k == 0 and lab == "1D":
+                continue
             c["b"] = np.digitize(c[col], bins) - 1
             g = c.groupby(["rep", "b"]).agg(dW=("dW", "mean"), x=(col, "mean")).reset_index()
             m = g.pivot(index="rep", columns="b", values="dW")
@@ -561,7 +563,7 @@ def figure18(expt, sw_bins=(-400., -200., -100., -50., 0., 50., 100., 200.), bir
             l, = ax.plot(x[ok], np.nanmean(m.values, axis=0)[ok], lw=1.8, marker="o", ms=4, label=lab, **st.RT[lab])
             if k == 0:
                 h.append(l)
-    axs[0].set_xlabel(r"surface shortwave under the cloud minus domain mean [W m$^{-2}$]")
+    axs[0].set_xlabel(r"shadow moved off the footprint [W m$^{-2}$]")
     axs[1].set_xlabel("births within 1 km in the preceding 5 min")
     axs[0].set_ylabel("width change over 5 min [m]")
     for k, ax in enumerate(axs):
