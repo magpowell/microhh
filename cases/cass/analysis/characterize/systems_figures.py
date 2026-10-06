@@ -105,7 +105,7 @@ def figure_map(expt, rep=1, solar=14.5, vmax=200.):
     from matplotlib.colors import LogNorm
     M = members(expt)
     fig, axs = plt.subplots(1, 2, figsize=(9., 5.1), sharey=True, layout="constrained")
-    cmap = plt.get_cmap("viridis_r").copy()
+    cmap = plt.get_cmap("viridis").copy()
     for k, ((rt, lab), ax) in enumerate(zip(cl.RTS, axs)):
         p, y, tc = M[(lab, rep)]
         run = Run(run_dir(expt, rt, rep))
