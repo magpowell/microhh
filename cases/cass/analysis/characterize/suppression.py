@@ -122,32 +122,35 @@ def rates(runs, key="cloud_births"):
 
 
 def decompose(runs, key="cloud_births", lit=LIT):
-    """Per hour: open-ground birth rate on lit and shaded ground, shaded share of open ground, and the 3D deficit split
-    into the part from shading open ground (placement) and the part from a lower rate on lit ground."""
-    rows = []
+    """Per hour, members pooled (births and area-time summed before dividing): birth rate on lit and shaded open ground,
+    shaded share of open ground, and the 3D deficit split into the shading of open ground (placement) and the lower
+    rate on lit ground. The two parts sum to the deficit exactly."""
+    acc = {}
     for (rt, rep), ds in runs.items():
         litb = ds.bin_lo.values >= lit
-        for h, hour in enumerate(ds.hour.values):
-            at, b = ds.area_time.values[h], ds[key].values[h]
-            rows.append(dict(rt=rt, rep=rep, hour=hour, open=float(ds.open_fraction[h]), shaded_share=float(1. - ds.lit_open_fraction[h] / max(float(ds.open_fraction[h]), 1e-9)),
-                             rate_all=b.sum() / at.sum(), rate_lit=b[litb].sum() / max(at[litb].sum(), 1e-9),
-                             rate_shaded=b[~litb].sum() / max(at[~litb].sum(), 1e-9), area_lit=at[litb].sum(), area_shaded=at[~litb].sum(),
-                             births=b.sum()))
-    d = pd.DataFrame(rows)
-    m = d.groupby(["hour", "rt"]).mean(numeric_only=True).drop(columns="rep").unstack("rt")
-    o = pd.DataFrame(index=m.index)
-    for c in ("open", "shaded_share", "rate_all", "rate_lit", "rate_shaded"):
-        o[f"{c}_1D"], o[f"{c}_3D"] = m[c][RTS[0]], m[c][RTS[1]]
-    # counterfactual births on 3D open ground with the 1D lit rate everywhere
-    r1 = m["rate_lit"][RTS[0]]
-    a_lit, a_sh, b3 = m["area_lit"][RTS[1]], m["area_shaded"][RTS[1]], m["births"][RTS[1]]
-    o["births_3D"] = b3
-    o["births_3D_if_1D_rate"] = r1 * (a_lit + a_sh)
-    o["deficit"] = o["births_3D_if_1D_rate"] - b3
-    o["deficit_placement"] = (r1 - m["rate_shaded"][RTS[1]]) * a_sh
-    o["deficit_lit_rate"] = (r1 - m["rate_lit"][RTS[1]]) * a_lit
-    o["placement_share"] = o["deficit_placement"] / o["deficit"]
-    return o.reset_index()
+        b, at = ds[key].values, ds.area_time.values
+        a = acc.setdefault(rt, dict(b=0., a=0., bl=0., al=0., bs=0., ash=0., open=0., n=0))
+        a["b"] = a["b"] + b.sum(1); a["a"] = a["a"] + at.sum(1)
+        a["bl"] = a["bl"] + b[:, litb].sum(1); a["al"] = a["al"] + at[:, litb].sum(1)
+        a["bs"] = a["bs"] + b[:, ~litb].sum(1); a["ash"] = a["ash"] + at[:, ~litb].sum(1)
+        a["open"] = a["open"] + ds.open_fraction.values; a["n"] += 1
+        hours = ds.hour.values
+    o = pd.DataFrame(dict(hour=hours))
+    for rt, lab in zip(RTS, ("1D", "3D")):
+        a = acc[rt]
+        o[f"open_{lab}"] = a["open"] / a["n"]
+        o[f"shaded_share_{lab}"] = a["ash"] / np.maximum(a["a"], 1e-9)
+        o[f"rate_all_{lab}"] = a["b"] / np.maximum(a["a"], 1e-9)
+        o[f"rate_lit_{lab}"] = a["bl"] / np.maximum(a["al"], 1e-9)
+        o[f"rate_shaded_{lab}"] = a["bs"] / np.maximum(a["ash"], 1e-9)
+    r1, t3 = o["rate_lit_1D"].values, acc[RTS[1]]
+    o["births_3D"] = t3["b"]
+    o["births_3D_if_1D_rate"] = r1 * t3["a"]
+    o["deficit"] = o["births_3D_if_1D_rate"] - o["births_3D"]
+    o["deficit_placement"] = (r1 - o["rate_shaded_3D"].values) * t3["ash"]
+    o["deficit_lit_rate"] = (r1 - o["rate_lit_3D"].values) * t3["al"]
+    o["placement_share"] = o["deficit_placement"] / o["deficit"].where(o["deficit"] > 0)
+    return o
 
 
 def summary(expt, tag=""):

@@ -28,3 +28,23 @@ def test_accumulate_counts_by_class():
     lit = np.digitize(30., sp.BINS) - 1
     assert out["area_time"][2, shaded] == 10 * N - 1 and out["area_time"][2, lit] == 10 * N
     assert out["births"][2, shaded] == 1 and out["births"][2, lit] == 1 and out["births"].sum() == 2
+
+
+def test_decompose_parts_sum_to_the_deficit():
+    import xarray as xr
+    import pandas as pd
+    rng = np.random.default_rng(1)
+    runs = {}
+    for rt in ("2stream", "raytracer"):
+        for rep in range(1, 5):
+            at = rng.uniform(0.5, 5., (sp.HOURS.size, sp.BINS.size - 1))
+            b = rng.poisson(2., at.shape).astype(float)
+            runs[(rt, rep)] = xr.Dataset({"cloud_births": (("hour", "bin"), b), "area_time": (("hour", "bin"), at),
+                                          "open_fraction": ("hour", rng.uniform(0.1, 0.5, sp.HOURS.size))},
+                                         coords=dict(hour=sp.HOURS, bin=np.arange(sp.BINS.size - 1), bin_lo=("bin", sp.BINS[:-1])))
+    o = sp.decompose(runs)
+    assert np.allclose(o.deficit_placement + o.deficit_lit_rate, o.deficit)
+    # the rates are pooled counts: check one by hand
+    bl = sum(float(runs[("2stream", r)].cloud_births.values[0, sp.BINS[:-1] >= sp.LIT].sum()) for r in range(1, 5))
+    al = sum(float(runs[("2stream", r)].area_time.values[0, sp.BINS[:-1] >= sp.LIT].sum()) for r in range(1, 5))
+    assert np.isclose(o.rate_lit_1D[0], bl / al)

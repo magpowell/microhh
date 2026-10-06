@@ -1,10 +1,10 @@
 """Two bookkeeping checks on the width gap.
 
 python width_gap.py [--expt no_aerosols_zero_wind_v2]     -> width_gap.csv, arithmetic.csv, figure 19
-1. Decomposition by hour: the 3D minus 1D mean width of clouds, against the excess widening 3D incumbents accumulate
-   over their age at equal footprint sunlight, nearby births and size (the regression offset of widening.py times
-   the cloud's age in 5-min steps). The remainder is what fewer sites leave to each cloud.
-2. Arithmetic: cloud number against mean cloud area per minute; at fixed cover both runs must fall on one hyperbola.
+1. The 3D minus 1D mean width by hour, split by the age of the site: shift of the age distribution along the 1D
+   width-age relation against wider at the same age.
+2. Arithmetic: hourly cloud number, mean area and cover; figure 19 shows number against mean area per minute, where
+   both runs lie on the iso-cover hyperbolae.
 """
 import argparse
 import itertools
@@ -34,36 +34,6 @@ def with_age(expt, d):
 
 
 AGE_BINS = np.array([0., 2., 5., 10., 20., 40., 1.e4])   # minutes
-
-
-def decomposition(expt, d, n_boot=300, seed=0):
-    """Per hour: the 3D minus 1D mean width, and the 3D excess widening per 5 min split into the part carried by the
-    footprint sunlight (3D slope times the 1D to 3D difference in footprint anomaly) and the offset at equal covariates."""
-    rows = []
-    rng = np.random.default_rng(seed)
-    for h0, h1 in HOURS:
-        w = d[(d.lst >= h0) & (d.lst < h1)]
-        a, b = w[w.rt == RTS[0]], w[w.rt == RTS[1]]
-        dsw = b.dSW_root.mean() - a.dSW_root.mean()
-        est = []
-        for k in range(n_boot + 1):
-            if k == 0:
-                wa, wb = a, b
-            else:
-                ga = [g.iloc[rng.integers(0, len(g), len(g))] for _, g in a.groupby("rep")]
-                gb = [g.iloc[rng.integers(0, len(g), len(g))] for _, g in b.groupby("rep")]
-                wa, wb = pd.concat(ga), pd.concat(gb)
-            slope = wd.fit(wb, "full")["dSW_root"]
-            off = wd.fit(pd.concat([wa, wb]), "full", offset=True)["offset_3D"]
-            est.append((slope * dsw, off))
-        est = np.array(est)
-        lo, hi = np.percentile(est[1:], [2.5, 97.5], axis=0)
-        rows.append(dict(hour=f"{h0:.0f}-{h1:.0f}", W_1D=a.W.mean(), W_3D=b.W.mean(), gap=b.W.mean() - a.W.mean(), dSW_3D_minus_1D=dsw,
-                         direct_per_5min=est[0, 0], direct_lo=lo[0], direct_hi=hi[0], other_per_5min=est[0, 1], other_lo=lo[1], other_hi=hi[1],
-                         dW_1D=a.dW.mean(), dW_3D=b.dW.mean()))
-    out = pd.DataFrame(rows)
-    out["direct_share"] = out.direct_per_5min / (out.direct_per_5min + out.other_per_5min)
-    return out
 
 
 def by_age(d):
@@ -101,8 +71,7 @@ def arithmetic(expt, min_area=MIN_AREA):
     out = pd.DataFrame({"cover_1D": e["cover"][RTS[0]], "cover_1D_lo": e["cover_lo"][RTS[0]], "cover_1D_hi": e["cover_hi"][RTS[0]],
                         "cover_3D": e["cover"][RTS[1]], "cover_3D_lo": e["cover_lo"][RTS[1]], "cover_3D_hi": e["cover_hi"][RTS[1]],
                         "n_1D": e["n"][RTS[0]], "n_3D": e["n"][RTS[1]], "area_1D": e["mean_area"][RTS[0]], "area_3D": e["mean_area"][RTS[1]]})
-    out["n_ratio"], out["area_ratio"] = out.n_3D / out.n_1D, out.area_3D / out.area_1D
-    out["n_times_area_ratio"], out["cover_ratio"] = out.n_ratio * out.area_ratio, out.cover_3D / out.cover_1D
+    out["n_ratio"], out["area_ratio"], out["cover_ratio"] = out.n_3D / out.n_1D, out.area_3D / out.area_1D, out.cover_3D / out.cover_1D
     return m, out.reset_index()
 
 
@@ -136,16 +105,12 @@ if __name__ == "__main__":
     fmt = lambda v: f"{v:.3g}"
     res = out_path(a.expt, "2stream", 1, 0).parents[2]
     d = with_age(a.expt, wd.load(a.expt))
-    dec = decomposition(a.expt, d)
-    dec.to_csv(res / "width_gap.csv", index=False)
-    print("--- width gap [m] by hour, and the 3D excess widening per 5 min split into the footprint-sunlight part and the offset at equal covariates")
-    print(dec.to_string(index=False, float_format=fmt))
     ba = by_age(d)
     ba.to_csv(res / "width_gap_age.csv", index=False)
-    print("\n--- the same gap split by age: older sites (shift along the 1D width-age relation) against wider at the same age")
+    print("--- width gap [m] by hour split by age: older sites (shift along the 1D width-age relation) against wider at the same age")
     print(ba.to_string(index=False, float_format=fmt))
     m, ar = arithmetic(a.expt)
     ar.to_csv(res / "arithmetic.csv", index=False)
-    print("\n--- arithmetic by hour: cover (member mean and range), number, mean area; the product of the ratios must equal the cover ratio")
+    print("\n--- arithmetic by hour: cover (member mean and range), number, mean area, and their 3D over 1D ratios")
     print(ar.to_string(index=False, float_format=fmt))
     print(figure19(a.expt, m))
