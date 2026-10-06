@@ -80,17 +80,19 @@ def pulses(m, tracks_core, lst, dx, dy):
 def shells(m, tracks_cloud, lst, dx, dy):
     """One row per cloud track: pulses hosted, active frames, frames before the first and after the last core."""
     g = m.groupby("cloud_track")
-    s = pd.DataFrame(dict(n_pulses=g.core_track.nunique(), active=g.frame.nunique(), core_first=g.frame.min(), core_last=g.frame.max()))
+    per = m.groupby(["cloud_track", "core_track"]).size()
+    s = pd.DataFrame(dict(n_pulses=g.core_track.nunique(), active=g.frame.nunique(), core_first=g.frame.min(), core_last=g.frame.max(),
+                          longest=per.groupby(level=0).max()))
     t = tracks_cloud.set_index("track")
     t = t[(t.birth != "start") & (t.death != "end")]
     s = t[["frame_first", "frame_last", "area_max", "merges_in", "splits_out"]].join(s)
-    s[["n_pulses", "active"]] = s[["n_pulses", "active"]].fillna(0).astype(int)
+    s[["n_pulses", "active", "longest"]] = s[["n_pulses", "active", "longest"]].fillna(0).astype(int)
     s["frames"] = s.frame_last - s.frame_first + 1
     s["lead"] = s.core_first - s.frame_first
     s["decay"] = s.frame_last - s.core_last
     s["D"] = mk.equivalent_diameter(s.area_max.values / (dx * dy), dx, dy)
     s["lst"] = lst[s.frame_first.values.astype(int)]
-    return s.reset_index()
+    return s.reset_index().rename(columns={"track": "cloud_track"})
 
 
 def analyse(expt, rt, rep):
@@ -141,7 +143,8 @@ def summary(expt):
             a = g[g.n_pulses > 0]
             S.append(dict(rt=rt, rep=rep, hour=int(h), cls=c, n=len(g), ever_active=(g.n_pulses > 0).mean(), frames=g.frames.mean(),
                           n_pulses=a.n_pulses.mean(), multi_pulse=(a.n_pulses > 1).mean(), active=a.active.mean(), active_frac=(a.active / a.frames).mean(),
-                          lead=a.lead.mean(), decay=a.decay.mean()))
+                          lead=a.lead.mean(), decay=a.decay.mean(), longest=a.longest.mean(), longest_p90=a.longest.quantile(.9),
+                          rate=(10. * a.n_pulses / a.frames).mean()))
     P, S = pd.DataFrame(P), pd.DataFrame(S)
     res = out_path(expt, "2stream", 1, 0).parents[2]
     P.to_csv(res / "core_life_pulses_long.csv", index=False); S.to_csv(res / "core_life_shells_long.csv", index=False)
@@ -167,6 +170,10 @@ if __name__ == "__main__":
         print(show(eP, ["n", "dur_mean", "dur_p90", "shell_changed", "untouched", "dur_untouched"]))
         print("\n--- shells (cloud tracks) by hour of birth and width: ever active, pulses hosted, active frames and fraction, frames before the first and after the last core")
         print(show(eS, ["n", "ever_active", "frames", "n_pulses", "multi_pulse", "active", "active_frac", "lead", "decay"]))
+        print("\n--- sites against pulses, shells of at least 1 km: site life [min], longest pulse the site held (mean, p90), pulses per site and per 10 min of site life, mean pulse")
+        big = eS.xs(D_LABELS[-1], level="cls")
+        big[("pulse", "1D")], big[("pulse", "3D")] = eP.xs(D_LABELS[-1], level="cls")[("dur_mean", "1D")], eP.xs(D_LABELS[-1], level="cls")[("dur_mean", "3D")]
+        print(big.loc[:, [(c, k) for c in ("frames", "longest", "longest_p90", "n_pulses", "rate", "pulse") for k in ("1D", "3D")]].to_string(float_format=fmt))
     else:
         ds = analyse(a.expt, a.rt, a.rep)
         p, s = tables(a.expt, a.rt, a.rep)

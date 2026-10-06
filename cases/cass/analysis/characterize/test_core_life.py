@@ -41,9 +41,9 @@ def test_pulses_and_shells():
     assert p.frames.tolist() == [3, 6, 1] and p.n_shells.tolist() == [1, 2, 1] and p.shell_changed.tolist() == [False, True, False]
     assert p.untouched.all() and np.allclose(p.shell_D, 2. * np.sqrt(np.array([36., 36., 36.]) * DX * DX / np.pi))
     A = s[s.n_pulses == 2].iloc[0]
-    assert A.active == 4 and A.frames == 5 and A.lead == 0 and A.decay == 0
+    assert A.active == 4 and A.frames == 5 and A.lead == 0 and A.decay == 0 and A.longest == 3
     B = s[(s.n_pulses == 1) & (s.splits_out == 1)].iloc[0]         # the original B keeps the large right piece: core frames 1-3 only
-    assert B.active == 3 and B.frames == 6 and B.decay == 3
+    assert B.active == 3 and B.frames == 6 and B.decay == 3 and B.longest == 3
     Bp = s[(s.n_pulses == 1) & (s.splits_out == 0)].iloc[0]        # the split-off left piece hosts the core at frames 4-6
-    assert Bp.active == 3 and Bp.frames == 3 and Bp.lead == 0 and Bp.decay == 0
+    assert Bp.active == 3 and Bp.frames == 3 and Bp.lead == 0 and Bp.decay == 0 and Bp.longest == 3
     assert len(s) == 3 and (s.n_pulses > 0).all()
