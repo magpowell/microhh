@@ -15,7 +15,7 @@ import masks as mk
 import pressure as pr
 import thermo as th
 from les_io import Run, eqtime_h, lowest
-from snapshot import load, out_path, run_dir, snapshot_times
+from snapshot import cloud_base_index, frames_every, load, out_path, run_dir, snapshot_times
 
 IZB = 2                                   # cloud-base threshold 1e-3
 XL = np.linspace(-1., 1., 200)
@@ -120,16 +120,6 @@ def cloud_table(run, qc, w_full, thv, labels, n):
                                  ).sum(axis=0) * (run.z[1] - run.z[0]), labels, idx) / np.maximum(area, 1))
 
 
-def cloud_base_index(expt, rt, rep, t):
-    """Cloud-base level of the snapshot at t, or of the nearest snapshot in time when t has none."""
-    snaps = snapshot_times(expt, rt, rep)
-    if not snaps:
-        raise FileNotFoundError(f"no snapshot files for {expt} {rt} rep {rep}")
-    tn = min(snaps, key=lambda x: abs(x - t))
-    with xr.open_dataset(out_path(expt, rt, rep, tn)) as s:
-        return int(s["kb"].values[IZB])
-
-
 def analyse(expt, rt, rep, t):
     run = Run(run_dir(expt, rt, rep))
     kb = cloud_base_index(expt, rt, rep, t)
@@ -228,11 +218,7 @@ if __name__ == "__main__":
     ap.add_argument("--solar", type=float, nargs=2, default=(12., 16.1))
     a = ap.parse_args()
     if a.every:
-        run = Run(run_dir(a.expt, a.rt, a.rep))
-        ts = np.array(run.hf_times())
-        lst = run.lst(ts)
-        step = int(round(a.every * 60. / (ts[1] - ts[0])))
-        a.t = [int(t) for t in ts[::step] if a.solar[0] <= run.lst(t) < a.solar[1]]
+        a.t = frames_every(Run(run_dir(a.expt, a.rt, a.rep)), a.every, a.solar)
     a.t = a.t or list(snapshot_times(a.expt, a.rt, a.rep, skip_first=False))
     for t in a.t:
         o = analyse(a.expt, a.rt, a.rep, t)

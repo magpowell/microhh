@@ -9,19 +9,23 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from snapshot import out_path, snapshot_times
+from snapshot import file_times, out_path, snapshot_times
 
 RTS = ("2stream", "raytracer")
 W_BINS = np.array([0., 1., 2., 3., 4., 5., 50.])        # m/s
 D_BINS = np.array([0., 400., 800., 1600., 1.e5])        # m, equivalent diameter
 
 
-def load(expt, x="w_core_layer", min_points=4):
+def load(expt, x="w_core_layer", min_points=4, hourly=False):
+    """One row per cloud; with hourly, every cloudw file is read and t holds the solar hour instead of the time."""
     rows = []
-    for t, rt, rep in itertools.product(snapshot_times(expt, skip_first=False), RTS, range(1, 5)):
+    for rt, rep in itertools.product(RTS, range(1, 5)):
+      for t in (file_times(expt, rt, rep, "cloudw") if hourly else snapshot_times(expt, skip_first=False)):
         with xr.open_dataset(out_path(expt, rt, rep, t).with_name(f"cloudw_{t:07d}.nc")) as ds:
             d = ds.to_dataframe()
             lst = float(ds.attrs["lst_solar"])
+        if hourly:
+            t = int(np.floor(lst))
         d = d[d[x.replace("w_", "n_", 1)] >= min_points].copy()
         d["w"], d["t"], d["lst"], d["rt"], d["rep"] = d[x], t, lst, rt, rep
         rows.append(d[["t", "lst", "rt", "rep", "w", "depth", "D", "area", "z_base", "z_top"]])
@@ -69,8 +73,8 @@ def binned(d):
     return g, out
 
 
-def main(expt, x="w_core_layer", min_points=4):
-    d = load(expt, x, min_points)
+def main(expt, x="w_core_layer", min_points=4, hourly=False):
+    d = load(expt, x, min_points, hourly)
     g, b = binned(d)
     rows = []
     for t, dt in d.groupby("t"):
@@ -80,7 +84,7 @@ def main(expt, x="w_core_layer", min_points=4):
                              w_1D=dt[dt.rt == RTS[0]].w.mean(), w_3D=dt[dt.rt == RTS[1]].w.mean(), **split_jackknife(dt, by)))
     s = pd.DataFrame(rows)
     res = out_path(expt, "2stream", 1, 0).parents[2]
-    tag = "" if x == "w_core_layer" else f"_{x}"
+    tag = ("" if x == "w_core_layer" else f"_{x}") + ("_hourly" if hourly else "")
     d.to_csv(res / f"depth_w_clouds{tag}.csv", index=False)
     b.to_csv(res / f"depth_w_binned{tag}.csv")
     s.to_csv(res / f"depth_w_split{tag}.csv", index=False)
@@ -92,8 +96,9 @@ if __name__ == "__main__":
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v2")
     ap.add_argument("--x", default="w_core_layer")
     ap.add_argument("--min-points", type=int, default=4)
+    ap.add_argument("--hourly", action="store_true", help="every cloudw file, pooled by solar hour")
     a = ap.parse_args()
-    d, b, s = main(a.expt, a.x, a.min_points)
+    d, b, s = main(a.expt, a.x, a.min_points, a.hourly)
     pd.set_option("display.width", 250); pd.set_option("display.max_rows", 300); pd.set_option("display.max_columns", 60)
     f = lambda v: f"{v:.3g}"
     print(f"--- binned by {a.x} (bin edges {W_BINS[:-1]} m/s), member means")

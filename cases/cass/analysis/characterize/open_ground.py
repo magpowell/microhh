@@ -18,8 +18,7 @@ import xarray as xr
 import masks as mk
 import thermo as th
 from les_io import Run
-from composite import cloud_base_index
-from snapshot import load as load_fields, out_path, run_dir, snapshot_times
+from snapshot import cloud_base_index, frames_every, load as load_fields, out_path, run_dir, snapshot_times
 from suppression import far_from_cloud, cloud_mask
 from widening import surface_sw
 
@@ -221,10 +220,7 @@ if __name__ == "__main__":
     ap.add_argument("--solar", type=float, nargs=2, default=(11.9, 16.1))
     a = ap.parse_args()
     if a.every and a.rt:
-        run = Run(run_dir(a.expt, a.rt, a.rep))
-        ts = np.array(run.hf_times())
-        step = int(round(a.every * 60. / (ts[1] - ts[0])))
-        a.t = [int(t) for t in ts[::step] if a.solar[0] <= run.lst(t) < a.solar[1]]
+        a.t = frames_every(Run(run_dir(a.expt, a.rt, a.rep)), a.every, a.solar)
     a.t = a.t or (list(snapshot_times(a.expt, a.rt, a.rep, skip_first=True)) if a.rt else None)
     if a.series:
         d, o = series(a.expt)

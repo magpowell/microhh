@@ -49,6 +49,28 @@ def snapshot_times(expt, rt="2stream", rep=1, skip_first=False):
     return tuple(ts[1:] if skip_first else ts)
 
 
+def frames_every(run, every, solar=(11.9, 16.1)):
+    """Times of the 60 s fields every `every` minutes within the solar window."""
+    ts = np.array(run.hf_times())
+    step = int(round(every * 60. / (ts[1] - ts[0])))
+    return [int(t) for t in ts[::step] if solar[0] <= run.lst(t) < solar[1]]
+
+
+def file_times(expt, rt, rep, kind):
+    """Times of the <kind>_<t>.nc files of a run."""
+    return sorted(int(p.stem.split("_")[-1]) for p in out_path(expt, rt, rep, 0).parent.glob(f"{kind}_*.nc"))
+
+
+def cloud_base_index(expt, rt, rep, t, izb=2):
+    """Cloud-base level of the snapshot at t, or of the nearest snapshot in time when t has none."""
+    snaps = snapshot_times(expt, rt, rep)
+    if not snaps:
+        raise FileNotFoundError(f"no snapshot files for {expt} {rt} rep {rep}")
+    tn = min(snaps, key=lambda x: abs(x - t))
+    with xr.open_dataset(out_path(expt, rt, rep, tn)) as s:
+        return int(s["kb"].values[izb])
+
+
 def load(run, t):
     """Fields at t from the 60 s fields (thl, qt, w, u, v, p to hf_zmax) or the hourly dumps; T, ql, qi derived when
     not on disk. The run is restricted to the levels loaded."""

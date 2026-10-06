@@ -316,11 +316,13 @@ def figure9(expt, tag="", window=(12., 15.)):
     return st.savefig(fig, expt, f"fig9_lifetime{tag}")
 
 
-def figure10(expt, times=None, x="w_core_layer", xmax=7.):
+def figure10(expt, times=None, x="w_core_layer", xmax=7., hourly=False):
     """Cloud depth against core updraft speed at cloud base, one point per cloud."""
     times = times or snapshot_times(expt)[-2:]
     import depth_w as dw
-    d = dw.load(expt, x)
+    d = dw.load(expt, x, hourly=hourly)
+    if hourly:
+        times = sorted(d.t.unique())
     g, _ = dw.binned(d)
     fig, axs = plt.subplots(1, len(times), figsize=(4.2 * len(times), 3.8), sharey=True, constrained_layout=True)
     h = []
@@ -339,10 +341,10 @@ def figure10(expt, times=None, x="w_core_layer", xmax=7.):
         ax.set_xlim(0., xmax)
         ax.set_xlabel(r"core updraft speed at cloud base [m s$^{-1}$]")
         st.apply(ax)
-        st.panel(ax, k, st.lt(float(d[d.t == t].lst.iloc[0])))
+        st.panel(ax, k, f"{t:.0f}-{t + 1:.0f} LT" if hourly else st.lt(float(d[d.t == t].lst.iloc[0])))
     axs[0].set_ylabel("cloud depth [m]")
     fig.legend(handles=h, ncols=2, loc="outside lower center")
-    return st.savefig(fig, expt, "fig10_depth_speed" + ("" if x == "w_core_layer" else f"_{x}"))
+    return st.savefig(fig, expt, "fig10_depth_speed" + ("" if x == "w_core_layer" else f"_{x}") + ("_hourly" if hourly else ""))
 
 
 def _window(a, j0, i0, h):
@@ -491,11 +493,13 @@ if __name__ == "__main__":
         print(fn(a.expt))
 
 
-def figure15(expt, times=None, var="qt", mask="core"):
+def figure15(expt, times=None, var="qt", mask="core", hourly=False):
     """Fractional entrainment of each cloud against its width; member medians per width class with min-max bands."""
     times = times or snapshot_times(expt)[-2:]
     import dilution as dl
-    d = dl.load_clouds(expt, mask)
+    d = dl.load_clouds(expt, mask, hourly=hourly)
+    if hourly:
+        times = sorted(d.t.unique())
     e = f"eps_{var}"
     fig, axs = plt.subplots(1, len(times), figsize=(4.2 * len(times), 3.8), sharey=True, constrained_layout=True)
     h = []
@@ -521,17 +525,19 @@ def figure15(expt, times=None, var="qt", mask="core"):
         ax.set_xlim(250., 4000.); ax.set_ylim(0.05, 5.)
         ax.set_xlabel("cloud width [m]")
         st.apply(ax)
-        st.panel(ax, k, st.lt(float(d[d.t == t].lst.iloc[0])))
+        st.panel(ax, k, f"{t:.0f}-{t + 1:.0f} LT" if hourly else st.lt(float(d[d.t == t].lst.iloc[0])))
     axs[0].set_ylabel(r"fractional entrainment [km$^{-1}$]")
     fig.legend(handles=h, ncols=3, loc="outside lower center")
-    return st.savefig(fig, expt, f"fig15_dilution_width_{var}" + ("" if mask == "core" else f"_{mask}"))
+    return st.savefig(fig, expt, f"fig15_dilution_width_{var}" + ("" if mask == "core" else f"_{mask}") + ("_hourly" if hourly else ""))
 
 
-def figure16(expt, times=None):
+def figure16(expt, times=None, hourly=False):
     """Cloud depth against the persistence of its cloudy site; member medians per duration class with min-max bands."""
     times = times or snapshot_times(expt)[-2:]
     import persistence as ps
-    d = ps.load_clouds(expt)
+    d = ps.load_clouds(expt, hourly=hourly)
+    if hourly:
+        times = sorted(d.t.unique())
     fig, axs = plt.subplots(1, len(times), figsize=(4.2 * len(times), 3.8), sharey=True, constrained_layout=True)
     h = []
     for k, t in enumerate(times):
@@ -550,10 +556,10 @@ def figure16(expt, times=None):
         ax.set_xlim(0.4, 100.)
         ax.set_xlabel("site persistence [min]")
         st.apply(ax)
-        st.panel(ax, k, st.lt(float(d[d.t == t].lst.iloc[0])))
+        st.panel(ax, k, f"{t:.0f}-{t + 1:.0f} LT" if hourly else st.lt(float(d[d.t == t].lst.iloc[0])))
     axs[0].set_ylabel("cloud depth [m]")
     fig.legend(handles=h, ncols=2, loc="outside lower center")
-    return st.savefig(fig, expt, "fig16_depth_persistence")
+    return st.savefig(fig, expt, "fig16_depth_persistence" + ("_hourly" if hourly else ""))
 
 
 def figure17(expt):

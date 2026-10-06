@@ -11,7 +11,7 @@ from scipy import ndimage
 
 import masks as mk
 from les_io import Run
-from snapshot import load, out_path, run_dir, snapshot_times
+from snapshot import cloud_base_index, frames_every, load, out_path, run_dir, snapshot_times
 
 IZB = 2
 NLEV = 4            # levels above the cloud-base level included in the cloud-base layer (100 m)
@@ -59,17 +59,18 @@ def table(f, z, dx, dy, kb, nlev=NLEV):
     return out
 
 
-def analyse(expt, rt, rep, t):
-    run = Run(run_dir(expt, rt, rep))
-    src = out_path(expt, rt, rep, t)
-    with xr.open_dataset(src) as s:
-        kb = int(s["kb"].values[IZB])
-        attrs = {a: s.attrs[a] for a in ("expt", "rt", "rep", "t_sec", "lst_solar")}
-    f, _ = load(run, t)
+def analyse(expt, rt, rep, t, fields=None):
+    """fields: (f, run) already loaded for this t, to share one load between scripts."""
+    f, run = fields if fields is not None else (None, Run(run_dir(expt, rt, rep)))
+    if f is None:
+        f, _ = load(run, t)
+    kb = cloud_base_index(expt, rt, rep, t, IZB)
     tab = table(f, run.z, run.dx, run.dy, kb)
     ds = xr.Dataset({v: ("cloud", a) for v, a in tab.items()})
-    ds.attrs.update(attrs, kb=kb, zb=float(run.z[kb]), layer_levels=NLEV + 1)
-    ds.to_netcdf(src.with_name(f"cloudw_{int(t):07d}.nc"))
+    ds.attrs.update(expt=expt, rt=rt, rep=rep, t_sec=int(t), lst_solar=float(run.lst(t)), kb=kb, zb=float(run.z[kb]), layer_levels=NLEV + 1)
+    out = out_path(expt, rt, rep, 0).parent
+    out.mkdir(parents=True, exist_ok=True)
+    ds.to_netcdf(out / f"cloudw_{int(t):07d}.nc")
     return ds
 
 
@@ -79,7 +80,11 @@ if __name__ == "__main__":
     ap.add_argument("--rt", required=True, choices=["2stream", "raytracer"])
     ap.add_argument("--rep", type=int, required=True)
     ap.add_argument("--t", type=int, nargs="+", default=None, help="default: the snapshot times of the run")
+    ap.add_argument("--every", type=float, default=None, help="instead: every N minutes of the 60 s fields within --solar")
+    ap.add_argument("--solar", type=float, nargs=2, default=(11.9, 16.1))
     a = ap.parse_args()
+    if a.every:
+        a.t = frames_every(Run(run_dir(a.expt, a.rt, a.rep)), a.every, a.solar)
     a.t = a.t or list(snapshot_times(a.expt, a.rt, a.rep, skip_first=False))
     for t in a.t:
         d = analyse(a.expt, a.rt, a.rep, t)

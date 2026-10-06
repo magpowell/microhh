@@ -15,7 +15,7 @@ from scipy import ndimage
 
 import masks as mk
 from les_io import Run
-from snapshot import load, out_path, run_dir, snapshot_times
+from snapshot import file_times, frames_every, load, out_path, run_dir, snapshot_times
 
 IZB = 2
 NLEV = 4            # levels above a cloud's own base forming its base layer (100 m)
@@ -118,25 +118,30 @@ def table(f, z, dx, dy, nlev=NLEV, min_pts=MIN_PTS, min_levels=MIN_LEVELS):
     return out
 
 
-def analyse(expt, rt, rep, t):
-    run = Run(run_dir(expt, rt, rep))
-    src = out_path(expt, rt, rep, t)
-    with xr.open_dataset(src) as s:
-        attrs = {a: s.attrs[a] for a in ("expt", "rt", "rep", "t_sec", "lst_solar")}
-    f, _ = load(run, t)
+def analyse(expt, rt, rep, t, fields=None):
+    """fields: (f, run) already loaded for this t, to share one load between scripts."""
+    f, run = fields if fields is not None else (None, Run(run_dir(expt, rt, rep)))
+    if f is None:
+        f, _ = load(run, t)
     tab = table(f, run.z, run.dx, run.dy)
     ds = xr.Dataset({v: ("cloud", a) for v, a in tab.items()})
-    ds.attrs.update(attrs, nlev=NLEV, min_pts=MIN_PTS, min_levels=MIN_LEVELS, z_f=Z_F)
-    ds.to_netcdf(src.with_name(f"dilution_{int(t):07d}.nc"))
+    ds.attrs.update(expt=expt, rt=rt, rep=rep, t_sec=int(t), lst_solar=float(run.lst(t)), nlev=NLEV, min_pts=MIN_PTS, min_levels=MIN_LEVELS, z_f=Z_F)
+    out = out_path(expt, rt, rep, 0).parent
+    out.mkdir(parents=True, exist_ok=True)
+    ds.to_netcdf(out / f"dilution_{int(t):07d}.nc")
     return ds
 
 
-def load_clouds(expt, mask="core"):
+def load_clouds(expt, mask="core", hourly=False):
+    """One row per cloud; with hourly, every dilution file is read and t holds the solar hour instead of the time."""
     rows = []
-    for t, rt, rep in itertools.product(snapshot_times(expt, skip_first=False), RTS, range(1, 5)):
+    for rt, rep in itertools.product(RTS, range(1, 5)):
+      for t in (file_times(expt, rt, rep, "dilution") if hourly else snapshot_times(expt, skip_first=False)):
         with xr.open_dataset(out_path(expt, rt, rep, t).with_name(f"dilution_{t:07d}.nc")) as ds:
             d = ds.to_dataframe()
             lst = float(ds.attrs["lst_solar"])
+        if hourly:
+            t = int(np.floor(lst))
         keep = ["area", "D", "z_top", "z_base", "depth"] + [c for c in d.columns if c.startswith(mask + "_")]
         d = d[keep].rename(columns={c: c[len(mask) + 1:] for c in keep if c.startswith(mask + "_")})
         d["t"], d["lst"], d["rt"], d["rep"] = t, lst, rt, rep
@@ -194,10 +199,10 @@ def depth_given_eps(d, var="qt"):
     return out
 
 
-def summary(expt, mask="core"):
-    d = load_clouds(expt, mask)
+def summary(expt, mask="core", hourly=False):
+    d = load_clouds(expt, mask, hourly)
     res = out_path(expt, "2stream", 1, 0).parents[2]
-    tag = "" if mask == "core" else f"_{mask}"
+    tag = ("" if mask == "core" else f"_{mask}") + ("_hourly" if hourly else "")
     d.to_csv(res / f"dilution_clouds{tag}.csv", index=False)
     rows, fits = [], []
     for var in ("qt", "thl"):
@@ -224,10 +229,15 @@ if __name__ == "__main__":
     ap.add_argument("--t", type=int, nargs="+", default=None, help="default: the snapshot times of the run")
     ap.add_argument("--summary", action="store_true")
     ap.add_argument("--mask", default="core", choices=["core", "cu"])
+    ap.add_argument("--hourly", action="store_true", help="summary over every file, pooled by solar hour")
+    ap.add_argument("--every", type=float, default=None, help="instead of --t: every N minutes of the 60 s fields within --solar")
+    ap.add_argument("--solar", type=float, nargs=2, default=(11.9, 16.1))
     a = ap.parse_args()
+    if a.every and a.rt:
+        a.t = frames_every(Run(run_dir(a.expt, a.rt, a.rep)), a.every, a.solar)
     a.t = a.t or (list(snapshot_times(a.expt, a.rt, a.rep, skip_first=False)) if a.rt else None)
     if a.summary:
-        d, b, f = summary(a.expt, a.mask)
+        d, b, f = summary(a.expt, a.mask, a.hourly)
         pd.set_option("display.width", 250); pd.set_option("display.max_columns", 60); pd.set_option("display.max_rows", 200)
         fmt = lambda v: f"{v:.3g}"
         print(f"--- eps per width class (edges {D_BINS[:-1]} m), member medians: mean and range [1/m]")

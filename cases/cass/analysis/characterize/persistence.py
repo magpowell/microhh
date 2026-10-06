@@ -14,7 +14,8 @@ import xarray as xr
 from scipy import ndimage, stats
 
 import masks as mk
-from snapshot import out_path, run_dir, snapshot_times
+from les_io import Run
+from snapshot import file_times, frames_every, out_path, run_dir, snapshot_times
 
 RTS = ("2stream", "raytracer")
 MIN_AREA = 4.e4                                            # m2, 16 cells, as in lifetime.py
@@ -83,19 +84,22 @@ def analyse(expt, rt, rep, t):
     now["D"] = mk.equivalent_diameter(now.area.values / (dx * dy), dx, dy)
     ds = xr.Dataset.from_dataframe(now[["track", "age", "family_age", "merges", "area", "D", "depth", "top", "base", "lwp", "n_buoy",
                                         "dur_mean", "dur_max"] + [f"cloudy_{m}min_ago" for m in LOOKBACK]])
-    ds.attrs.update(expt=expt, rt=rt, rep=rep, t_sec=t, frame=f, dt=dt, min_area=MIN_AREA)
+    ds.attrs.update(expt=expt, rt=rt, rep=rep, t_sec=t, lst_solar=float(Run(d).lst(t)), frame=f, dt=dt, min_area=MIN_AREA)
     ds.to_netcdf(res / f"persistence_{int(t):07d}.nc")
     return ds
 
 
-def load_clouds(expt, min_area=MIN_AREA):
+def load_clouds(expt, min_area=MIN_AREA, hourly=False):
+    """One row per cloud; with hourly, every persistence file is read and t holds the solar hour instead of the time."""
     rows = []
-    for t, rt, rep in itertools.product(snapshot_times(expt, skip_first=True), RTS, range(1, 5)):
+    for rt, rep in itertools.product(RTS, range(1, 5)):
+      for t in (file_times(expt, rt, rep, "persistence") if hourly else snapshot_times(expt, skip_first=True)):
         f = out_path(expt, rt, rep, 0).with_name(f"persistence_{t:07d}.nc")
         with xr.open_dataset(f) as ds:
             d = ds.to_dataframe()
-        with xr.open_dataset(out_path(expt, rt, rep, t)) as s:
-            lst = float(s.attrs["lst_solar"])
+            lst = float(ds.attrs["lst_solar"]) if "lst_solar" in ds.attrs else float(Run(run_dir(expt, rt, rep)).lst(t))
+        if hourly:
+            t = int(np.floor(lst))
         d["t"], d["lst"], d["rt"], d["rep"] = t, lst, rt, rep
         rows.append(d[d.area >= min_area])
     d = pd.concat(rows, ignore_index=True)
@@ -151,12 +155,13 @@ def binned(d):
     return g, pd.DataFrame(cols)
 
 
-def summary(expt):
-    d = load_clouds(expt)
+def summary(expt, hourly=False):
+    d = load_clouds(expt, hourly=hourly)
     res = out_path(expt, "2stream", 1, 0).parents[2]
-    d.to_csv(res / "persistence_clouds.csv", index=False)
+    tag = "_hourly" if hourly else ""
+    d.to_csv(res / f"persistence_clouds{tag}.csv", index=False)
     g, b = binned(d)
-    b.reset_index().to_csv(res / "persistence_binned.csv", index=False)
+    b.reset_index().to_csv(res / f"persistence_binned{tag}.csv", index=False)
     rows = []
     for t, dt in d.groupby("t"):
         row = dict(t=t, lst=dt.lst.iloc[0], **bootstrap(dt))
@@ -164,7 +169,7 @@ def summary(expt):
             row.update({f"{k}_{lab}": v for k, v in rank(dt[dt.rt == rt]).items()})
         rows.append(row)
     f = pd.DataFrame(rows)
-    f.to_csv(res / "persistence_fit.csv", index=False)
+    f.to_csv(res / f"persistence_fit{tag}.csv", index=False)
     return d, b, f
 
 
@@ -175,10 +180,15 @@ if __name__ == "__main__":
     ap.add_argument("--rep", type=int)
     ap.add_argument("--t", type=int, nargs="+", default=None, help="default: the snapshot times of the run")
     ap.add_argument("--summary", action="store_true")
+    ap.add_argument("--hourly", action="store_true", help="summary over every file, pooled by solar hour")
+    ap.add_argument("--every", type=float, default=None, help="instead of --t: every N minutes of the 60 s fields within --solar")
+    ap.add_argument("--solar", type=float, nargs=2, default=(11.9, 16.1))
     a = ap.parse_args()
+    if a.every and a.rt:
+        a.t = frames_every(Run(run_dir(a.expt, a.rt, a.rep)), a.every, a.solar)
     a.t = a.t or (list(snapshot_times(a.expt, a.rt, a.rep, skip_first=True)) if a.rt else None)
     if a.summary:
-        d, b, f = summary(a.expt)
+        d, b, f = summary(a.expt, a.hourly)
         pd.set_option("display.width", 250); pd.set_option("display.max_columns", 80); pd.set_option("display.max_rows", 200)
         fmt = lambda v: f"{v:.3g}"
         print(f"--- per width class (edges {D_BINS[:-1]} m): member medians of site duration [min], track age [min], merges, depth [m]")
