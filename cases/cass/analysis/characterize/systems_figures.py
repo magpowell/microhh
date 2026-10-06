@@ -100,11 +100,12 @@ def figure_series(expt, hours=np.arange(10., 17.01, 1.)):
     return st.savefig(fig, expt, "fig_systems_series")
 
 
-def figure_map(expt, rep=1, solar=14.5):
-    """Cloud field of one member at one time, clouds coloured by the kind of system they belong to."""
+def figure_map(expt, rep=1, solar=14.5, vmax=200.):
+    """Cloud field of one member at one time, every cloud coloured by the number of pulses its system holds over its life."""
+    from matplotlib.colors import LogNorm
     M = members(expt)
-    fig, axs = plt.subplots(1, 2, figsize=(9., 4.9), sharey=True, layout="constrained")
-    cmap = ListedColormap(KIND_COLORS)
+    fig, axs = plt.subplots(1, 2, figsize=(9., 5.1), sharey=True, layout="constrained")
+    cmap = plt.get_cmap("viridis_r").copy()
     for k, ((rt, lab), ax) in enumerate(zip(cl.RTS, axs)):
         p, y, tc = M[(lab, rep)]
         run = Run(run_dir(expt, rt, rep))
@@ -113,17 +114,20 @@ def figure_map(expt, rep=1, solar=14.5):
         lab2d, n = mk.label_periodic(path[f] > 0.)
         with xr.open_dataset(out_path(expt, rt, rep, 0).with_name("features.nc")) as ds:
             ft = ds.to_dataframe()
-        tid = ft[ft.frame == f].track.values
-        kind = pd.Series(tid).map(tc.set_index("track").family).map(y.kind).map({v: i for i, v in enumerate(KINDS)}).values
+        npul = pd.Series(ft[ft.frame == f].track.values).map(tc.set_index("track").family).map(y.n_pulses).values.astype(float)
         img = np.full(lab2d.shape, np.nan)
-        img[lab2d > 0] = kind[lab2d[lab2d > 0] - 1]
-        ax.pcolormesh(x / 1000., yy / 1000., img, cmap=cmap, vmin=-0.5, vmax=2.5, rasterized=True)
+        img[lab2d > 0] = npul[lab2d[lab2d > 0] - 1]
+        ax.pcolormesh(x / 1000., yy / 1000., np.where(img == 0., 1., np.nan), cmap=ListedColormap(["0.75"]), rasterized=True)
+        im = ax.pcolormesh(x / 1000., yy / 1000., np.where(img > 0., img, np.nan), cmap=cmap, norm=LogNorm(1., vmax), rasterized=True)
         ax.set_aspect("equal")
         ax.set_xlabel("x [km]")
         ax.tick_params(labelsize=8)
         st.panel(ax, k, lab)
+        print(f"{lab}: clouds {n}, in systems with 0 / 1 / 2-9 / 10-49 / 50+ pulses: {[(npul == 0).sum(), (npul == 1).sum(), ((npul > 1) & (npul < 10)).sum(), ((npul >= 10) & (npul < 50)).sum(), (npul >= 50).sum()]}; "
+              f"cloud area share in 50+ systems {np.isin(lab2d, np.flatnonzero(npul >= 50) + 1).sum() / (lab2d > 0).sum():.2f}")
     axs[0].set_ylabel("y [km]")
-    fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=c) for c in KIND_COLORS], labels=list(KINDS), ncols=3, loc="outside lower center")
+    cb = fig.colorbar(im, ax=axs, orientation="horizontal", shrink=0.5, pad=0.02, extend="max")
+    cb.set_label("pulses in the cloud system over its life [-]")
     return st.savefig(fig, expt, "fig_systems_map")
 
 
