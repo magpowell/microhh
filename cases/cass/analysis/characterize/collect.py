@@ -151,10 +151,11 @@ def key_table(summ, path):
     """Markdown table of headline metrics; spread is the sample standard deviation over members."""
     L = ["| metric | z_b threshold | solar LT | 1D mean | 1D sd | 3D mean | 3D sd | 3D - 1D | SE | within 2 SE |",
          "|---|---|---|---|---|---|---|---|---|---|"]
+    lst = summ[summ["metric"] == "lst_solar"].drop_duplicates("t_sec").set_index("t_sec")["mean_1D"]
     for m, thr, label, f in KEY:
         r = summ[(summ["metric"] == m) & np.isclose(summ["zb_thr"], thr)].sort_values("t_sec")
         for _, x in r.iterrows():
-            lt = 3.891 + x["t_sec"] / 3600.
+            lt = float(lst.get(x["t_sec"], np.nan))
             d, se = x["diff_3D_minus_1D"] * f, x["se_diff"] * f
             inside = "yes" if (se > 0 and abs(d) < 2. * se) or d == 0 else "no"
             L.append(f"| {label} | {'-' if thr < 0 else f'{thr:g}'} | {lt:.2f} | {x['mean_1D']*f:.4g} | {x['std_1D']*f:.2g} | "
