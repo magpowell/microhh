@@ -180,35 +180,22 @@ def figure_pdfs(expt, hours=((12., 13.), (13., 14.), (14., 15.), (15., 16.)), nb
 
 
 def figure_violins(expt):
-    """Multipulse system lifetime and pulses per multipulse system, all members pooled: violins on a linear axis cut
-    at the 98th percentile, with the median (line), the mean (dot) and the 90th percentile (tick)."""
+    """Multipulse system lifetime and pulses per multipulse system, all members pooled: seaborn violins, axis cut at
+    the 98th percentile."""
+    import seaborn as sns
     M = members(expt)
     rows = (("life", "multipulse system lifetime [min]"), ("n_pulses", "pulses per multipulse system [-]"))
+    d = []
+    for lab in ("1D", "3D"):
+        y = pd.concat([M[(lab, rep)][1] for rep in range(1, 5)])
+        d.append(y[~y.cut & (y.kind == "multipulse") & (y.lst >= WINDOW[0]) & (y.lst < WINDOW[1])].assign(rt=lab))
+    d = pd.concat(d)
     fig, axs = plt.subplots(1, 2, figsize=(6.4, 3.6), layout="constrained")
-    out = []
     for k, ((v, name), ax) in enumerate(zip(rows, axs)):
-        data = {}
-        for lab in ("1D", "3D"):
-            y = pd.concat([M[(lab, rep)][1] for rep in range(1, 5)])
-            data[lab] = y[~y.cut & (y.kind == "multipulse") & (y.lst >= WINDOW[0]) & (y.lst < WINDOW[1])][v].values.astype(float)
-        top = np.percentile(np.concatenate(list(data.values())), 98)
-        for i, lab in enumerate(("1D", "3D")):
-            d = data[lab]
-            vp = ax.violinplot(d[d <= top], positions=[i], widths=0.8, showextrema=False)
-            for body in vp["bodies"]:
-                body.set(facecolor=st.RT[lab]["color"], alpha=0.5, lw=0)
-            ax.hlines(np.median(d), i - 0.25, i + 0.25, color="k", lw=1.5)
-            ax.plot(i, d.mean(), "o", color="k", ms=4)
-            ax.hlines(np.percentile(d, 90), i - 0.1, i + 0.1, color="k", lw=1.)
-            out.append(dict(stat=name, rt=lab, n=d.size, median=np.median(d), mean=d.mean(), p75=np.percentile(d, 75), p90=np.percentile(d, 90), max=d.max()))
-        ax.set_xticks([0, 1], ["1D", "3D"])
-        ax.set_ylabel(name)
-        ax.set_ylim(0., top)
+        sns.violinplot(data=d, x="rt", y=v, hue="rt", palette={l: st.RT[l]["color"] for l in ("1D", "3D")}, cut=0, legend=False, ax=ax)
+        ax.set(xlabel="", ylabel=name, ylim=(0., d[v].quantile(0.98)))
         st.apply(ax)
         st.panel(ax, k)
-    out = pd.DataFrame(out)
-    out.to_csv(st.outdir(expt).parent / "systems_violins.csv", index=False)
-    print(out.to_string(index=False, float_format=lambda x: f"{x:.1f}"))
     return st.savefig(fig, expt, "fig_systems_violins")
 
 
