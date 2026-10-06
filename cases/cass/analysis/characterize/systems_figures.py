@@ -37,69 +37,6 @@ def members(expt):
     return {(lab, rep): _member(expt, rt, rep) for (rt, lab), rep in itertools.product(cl.RTS, range(1, 5))}
 
 
-def figure_bars(expt):
-    """Lifetimes of pulses, single-pulse clouds and multipulse systems, and pulses per multipulse system; member min-max."""
-    M = members(expt)
-    w = lambda d: d[(d.lst >= WINDOW[0]) & (d.lst < WINDOW[1])]
-    stats = (("pulse lifetime [min]", lambda p, y: w(p).frames.mean()),
-             ("single-pulse cloud lifetime [min]", lambda p, y: w(y[~y.cut & (y.kind == "single pulse")]).life.mean()),
-             ("multipulse system lifetime [min]", lambda p, y: w(y[~y.cut & (y.kind == "multipulse")]).life.mean()),
-             ("pulses per multipulse system [-]", lambda p, y: w(y[~y.cut & (y.kind == "multipulse")]).n_pulses.mean()))
-    fig, axs = plt.subplots(1, 4, figsize=(9.6, 3.), layout="constrained")
-    rows = []
-    for k, ((name, fn), ax) in enumerate(zip(stats, axs)):
-        for i, lab in enumerate(("1D", "3D")):
-            v = np.array([fn(*M[(lab, rep)][:2]) for rep in range(1, 5)])
-            ax.bar(i, v.mean(), width=0.6, **st.RT[lab])
-            ax.errorbar(i, v.mean(), yerr=[[v.mean() - v.min()], [v.max() - v.mean()]], color="k", capsize=3, lw=1)
-            ax.annotate(f"{v.mean():.1f}", (i, v.max()), xytext=(0, 3), textcoords="offset points", ha="center", fontsize=8, color="0.25")
-            rows.append(dict(stat=name, rt=lab, mean=v.mean(), min=v.min(), max=v.max()))
-        ax.set_xticks([0, 1], ["1D", "3D"])
-        ax.set_ylabel(name)
-        ax.margins(y=0.15)
-        st.apply(ax)
-        st.panel(ax, k)
-    pd.DataFrame(rows).to_csv(st.outdir(expt).parent / "systems_bars.csv", index=False)
-    return st.savefig(fig, expt, "fig_systems_bars")
-
-
-def figure_series(expt, hours=np.arange(10., 17.01, 1.)):
-    """Active systems present per area, and pulses per multipulse system by hour of its birth; member min-max."""
-    M = members(expt)
-    fig, axs = plt.subplots(1, 2, figsize=(8., 3.3), layout="constrained")
-    h = []
-    for rt, lab in cl.RTS:
-        A, B, lstm = [], [], None
-        for rep in range(1, 5):
-            p, y, tc = M[(lab, rep)]
-            run = Run(run_dir(expt, rt, rep))
-            lst = run.lst(tr.load(run.dir, "qlqi_path")[1])
-            act = y[y.kind != "passive"]
-            n = np.zeros(lst.size + 1)
-            np.add.at(n, act.f0.values.astype(int), 1); np.add.at(n, act.f1.values.astype(int) + 1, -1)
-            n = np.cumsum(n)[:-1] / (run.xsize * run.ysize * 1.e-6)
-            b = np.digitize(lst, hours) - 1
-            A.append([n[b == i].mean() for i in range(hours.size - 1)])
-            mp = y[~y.cut & (y.kind == "multipulse")]
-            bb = np.digitize(mp.lst.values, hours) - 1
-            B.append([mp.n_pulses.values[bb == i].mean() if (bb == i).sum() >= 5 else np.nan for i in range(hours.size - 1)])
-        x = 0.5 * (hours[:-1] + hours[1:])
-        for ax, v in zip(axs, (np.array(A), np.array(B))):
-            ax.fill_between(x, np.nanmin(v, axis=0), np.nanmax(v, axis=0), alpha=0.25, lw=0, **st.RT[lab])
-            line, = ax.plot(x, np.nanmean(v, axis=0), lw=1.8, marker="o", ms=4, label=lab, **st.RT[lab])
-        h.append(line)
-    axs[0].set_ylabel(r"active cloud systems present [km$^{-2}$]")
-    axs[1].set_ylabel("pulses per multipulse system [-]")
-    axs[1].set_yscale("log")
-    for k, ax in enumerate(axs):
-        ax.set_xlabel("local solar time [h]")
-        st.apply(ax)
-        st.panel(ax, k)
-    axs[0].set_ylim(bottom=0.)
-    fig.legend(handles=h, ncols=2, loc="outside lower center")
-    return st.savefig(fig, expt, "fig_systems_series")
-
-
 BIG = 50      # pulses: a much re-fed system
 
 
@@ -147,38 +84,6 @@ def figure_map(expt, rep=None, solar=14.5, vmax=200.):
     return st.savefig(fig, expt, "fig_systems_map")
 
 
-def figure_pdfs(expt, hours=((12., 13.), (13., 14.), (14., 15.), (15., 16.)), nbins=9):
-    """Distributions of multipulse system lifetime and of pulses per multipulse system by hour of the system's birth;
-    density per decade on logarithmic bins, member min-max."""
-    M = members(expt)
-    rows = (("life", "multipulse system lifetime [min]", np.logspace(np.log10(4.), np.log10(400.), nbins + 1)),
-            ("n_pulses", "pulses per multipulse system [-]", np.logspace(np.log10(2.), np.log10(300.), nbins + 1)))
-    fig, axs = plt.subplots(2, len(hours), figsize=(3. * len(hours), 5.6), sharey="row", sharex="row", layout="constrained")
-    for i, (v, name, edges) in enumerate(rows):
-        x = np.sqrt(edges[:-1] * edges[1:])
-        for j, (h0, h1) in enumerate(hours):
-            ax, h = axs[i, j], []
-            for lab in ("1D", "3D"):
-                pm, med = [], []
-                for rep in range(1, 5):
-                    y = M[(lab, rep)][1]
-                    d = y[~y.cut & (y.kind == "multipulse") & (y.lst >= h0) & (y.lst < h1)][v].values
-                    pm.append(np.histogram(d, bins=edges)[0] / max(d.size, 1) / np.diff(np.log10(edges)))
-                    med.append(np.median(d))
-                pm = np.array(pm)
-                ax.fill_between(x, pm.min(axis=0), pm.max(axis=0), alpha=0.25, lw=0, **st.RT[lab])
-                h.append(ax.plot(x, pm.mean(axis=0), lw=1.8, label=lab, **st.RT[lab])[0])
-                ax.axvline(np.mean(med), lw=1., ls="--", **st.RT[lab])
-            ax.set_xscale("log")
-            ax.set_xlabel(name)
-            st.apply(ax)
-            st.panel(ax, i * len(hours) + j, f"{h0:.0f}-{h1:.0f} LT" if i == 0 else "")
-        axs[i, 0].set_ylabel("probability density per decade [-]")
-        axs[i, 0].set_ylim(bottom=0.)
-    fig.legend(handles=h, ncols=2, loc="outside lower center")
-    return st.savefig(fig, expt, "fig_systems_pdfs")
-
-
 def figure_violins(expt):
     """Multipulse system lifetime and pulses per multipulse system, all members pooled: seaborn violins, axis cut at
     the 98th percentile."""
@@ -205,5 +110,5 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v3")
     a = ap.parse_args()
-    for fn in (figure_bars, figure_series, figure_map, figure_pdfs, figure_violins):
+    for fn in (figure_map, figure_violins):
         print(fn(a.expt))
