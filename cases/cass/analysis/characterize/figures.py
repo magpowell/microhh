@@ -541,3 +541,52 @@ def figure17(expt):
         st.panel(ax, k)
     fig.legend(handles=h, ncols=2, loc="outside lower center")
     return st.savefig(fig, expt, "fig17_births")
+
+
+def figure6_strip(expt, vlim=4.e-3):
+    """Buoyancy anomaly and circulation in the sun-parallel slice, 1D, 3D and their difference, across the snapshot times;
+    bottom row: surface shortwave along the slice relative to the domain mean."""
+    times = snapshot_times(expt)
+    rows = ("1D", "3D", "3D - 1D")
+    fig = plt.figure(figsize=(2.1 * len(times) + 0.6, 7.6), layout="constrained")
+    gs = fig.add_gridspec(4, len(times) + 1, height_ratios=(1, 1, 1, 0.5), width_ratios=[1] * len(times) + [0.05])
+    k = 0
+    for j, t in enumerate(times):
+        c = {lab: ens(expt, rt, t)[0].sel(dir="parallel") for rt, lab in RTS}
+        c["3D - 1D"] = c["3D"] - c["1D"]
+        lst = ens(expt, "2stream", t)[1][0].attrs["lst_solar"]
+        for i, lab in enumerate(rows):
+            ax = fig.add_subplot(gs[i, j])
+            d = c[lab]
+            im = ax.pcolormesh(d["xl"], d["znd"], d["b"], cmap=CMAP_ANOM, vmin=-vlim, vmax=vlim, rasterized=True)
+            q = d.isel(xl=slice(4, None, 12), znd=slice(4, None, 8))
+            ax.quiver(q["xl"], q["znd"], q["us"], q["w"], scale=24., width=0.005, color="0.15")
+            for x in (-0.5, 0.5):
+                ax.axvline(x, color="0.4", lw=0.6, ls="--")
+            ax.set(xlim=(-1, 1), ylim=(0, 1))
+            ax.tick_params(labelbottom=False, labelleft=(j == 0), labelsize=8)
+            if j == 0:
+                ax.set_ylabel(r"$z / z_b$ [-]")
+                row_label(ax, lab)
+            st.panel(ax, i * len(times) + j, st.lt(lst) if i == 0 else "")
+        ax = fig.add_subplot(gs[3, j])
+        h = []
+        for rt, lab in RTS:
+            e, m = ens(expt, rt, t)
+            pct = np.array([(d["sw"].sel(dir="parallel") / float(d["sw_domain"]) - 1.) * 100. for d in m])
+            ax.fill_between(e["xl"], pct.min(axis=0), pct.max(axis=0), alpha=0.25, lw=0, **st.RT[lab])
+            l, = ax.plot(e["xl"], pct.mean(axis=0), lw=1.6, label=lab, **st.RT[lab])
+            h.append(l)
+        st.zero_line(ax)
+        for x in (-0.5, 0.5):
+            ax.axvline(x, color="0.4", lw=0.6, ls="--")
+        ax.set(xlim=(-1, 1), ylim=(-60, 25), xlabel=r"$r_\parallel / L$ [-]")
+        ax.tick_params(labelleft=(j == 0), labelsize=8)
+        if j == 0:
+            ax.set_ylabel("surface SW,\nfrom domain\nmean [%]")
+        st.apply(ax)
+        st.panel(ax, 3 * len(times) + j)
+    cb = fig.colorbar(im, cax=fig.add_subplot(gs[:3, len(times)]))
+    cb.set_label(r"buoyancy anomaly [m s$^{-2}$]")
+    fig.legend(handles=h, ncols=2, loc="outside lower center")
+    return st.savefig(fig, expt, "fig6_circulation_strip")
