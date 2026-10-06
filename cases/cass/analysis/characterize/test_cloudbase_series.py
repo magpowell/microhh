@@ -34,5 +34,8 @@ def test_mass_flux_and_root_anomaly(monkeypatch):
     assert np.isclose(out["thv_core"], 0.5 - 0.5 * 4. / 256.)            # anomaly against the slab mean at cloud base
     k50 = int(np.argmin(np.abs(run.z - 0.5 * run.z[20])))
     assert k50 == 10 and np.isclose(out["thv_root_50"], 0.2 - 0.2 * 4. / 256.) and np.isclose(out["w_root_50"], 1. - 4. / 256.)
-    assert out["cin_undilute"] > 0. and out["frac_above_undilute"] in (0., 1.)
+    assert out["cin_undilute"] > 0. and out["frac_above_undilute"] in (0., 1.) and out["lfc_undilute"] == 1
     assert np.isclose(out["cover"], 4. / 256.)
+    monkeypatch.setattr(cb, "lift_thl", lambda env, kb, ktop, thl0, qt0, eps: np.full(nz, -0.01))     # never buoyant: no barrier defined
+    out = cb.frame(run, 0)
+    assert out["lfc_entraining"] == 0 and np.isnan(out["cin_entraining"]) and np.isnan(out["wcrit_entraining"]) and np.isnan(out["frac_above_entraining"])

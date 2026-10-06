@@ -66,9 +66,11 @@ def frame(run, t):
     thl0, qt0, w = float(f["thl"][kb][sel].mean()), float(f["qt"][kb][sel].mean()), f["w"][kb][sel]
     for tag, eps in EPS.items():
         cin, zlfc, found = cin_lfc(z, lift_thl(env, kb, ktop, thl0, qt0, eps), kb, ktop)
-        out[f"cin_{tag}"], out[f"zlfc_{tag}"] = cin, (zlfc if found else np.nan)
+        if not found:       # no level of free convection below Z_TOP: the barrier is not defined
+            cin = zlfc = np.nan
+        out[f"cin_{tag}"], out[f"zlfc_{tag}"], out[f"lfc_{tag}"] = cin, zlfc, int(found)
         out[f"wcrit_{tag}"] = np.sqrt(2. * cin)
-        out[f"frac_above_{tag}"] = float((w > np.sqrt(2. * cin)).mean())
+        out[f"frac_above_{tag}"] = float((w > np.sqrt(2. * cin)).mean()) if found else np.nan
     return out
 
 
@@ -96,18 +98,29 @@ def analyse(expt, rt, rep, every=5., solar=(11.9, 16.1)):
     return ds
 
 
+def mask_no_lfc(ds):
+    """Barrier quantities are undefined where no level of free convection was found (files written before the lfc flag)."""
+    for tag in EPS:
+        found = ds[f"zlfc_{tag}"].notnull()
+        for v in ("cin", "wcrit", "frac_above"):
+            ds[f"{v}_{tag}"] = ds[f"{v}_{tag}"].where(found)
+        if f"lfc_{tag}" not in ds:
+            ds[f"lfc_{tag}"] = found.astype(int)
+    return ds
+
+
 def load_all(expt):
     rows = []
     for rt, rep in itertools.product(RTS, range(1, 5)):
         with xr.open_dataset(out_path(expt, rt, rep, 0).with_name("cloudbase_series.nc")) as ds:
-            d = ds.to_dataframe().reset_index()
+            d = mask_no_lfc(ds.drop_dims("w_bin").load()).to_dataframe().reset_index()
         d["rt"], d["rep"] = rt, rep
         rows.append(d)
     return pd.concat(rows, ignore_index=True)
 
 
 VARS = ("zb", "cover", "lwp", "a_core", "w_core", "M_core", "a_cu", "w_cu", "M_cu", "thv_core", "qt_core", "thv_root_50", "w_root_50",
-        "thv_root_90", "cin_undilute", "cin_entraining", "wcrit_entraining", "frac_above_entraining")
+        "thv_root_90", "cin_undilute", "cin_entraining", "wcrit_entraining", "frac_above_entraining", "lfc_entraining")
 
 
 def summary(expt):
@@ -134,7 +147,8 @@ def load_hist(expt):
     out = {}
     for rt, rep in itertools.product(RTS, range(1, 5)):
         with xr.open_dataset(out_path(expt, rt, rep, 0).with_name("cloudbase_series.nc")) as ds:
-            out[(rt, rep)] = ds[["hist_core", "hist_cu", "lst", "wcrit_entraining"]].load()
+            out[(rt, rep)] = mask_no_lfc(ds[["hist_core", "hist_cu", "lst", "wcrit_entraining", "zlfc_entraining", "cin_entraining", "frac_above_entraining",
+                                             "wcrit_undilute", "zlfc_undilute", "cin_undilute", "frac_above_undilute"]].load())
     return out
 
 
