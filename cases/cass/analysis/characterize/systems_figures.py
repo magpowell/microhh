@@ -100,34 +100,50 @@ def figure_series(expt, hours=np.arange(10., 17.01, 1.)):
     return st.savefig(fig, expt, "fig_systems_series")
 
 
-def figure_map(expt, rep=1, solar=14.5, vmax=200.):
-    """Cloud field of one member at one time, every cloud coloured by the number of pulses its system holds over its life."""
+BIG = 50      # pulses: a much re-fed system
+
+
+@functools.lru_cache(maxsize=None)
+def map_field(expt, rt, lab, rep, solar):
+    """x, y [km] and, per column, the pulses the system of its cloud holds over its life (nan clear, 0 passive)."""
+    p, y, tc = members(expt)[(lab, rep)]
+    run = Run(run_dir(expt, rt, rep))
+    path, time, x, yy = tr.load(run.dir, "qlqi_path")
+    f = int(np.argmin(np.abs(run.lst(time) - solar)))
+    lab2d, n = mk.label_periodic(path[f] > 0.)
+    with xr.open_dataset(out_path(expt, rt, rep, 0).with_name("features.nc")) as ds:
+        ft = ds.to_dataframe()
+    npul = pd.Series(ft[ft.frame == f].track.values).map(tc.set_index("track").family).map(y.n_pulses).values.astype(float)
+    img = np.full(lab2d.shape, np.nan)
+    img[lab2d > 0] = npul[lab2d[lab2d > 0] - 1]
+    return x / 1000., yy / 1000., img
+
+
+def big_share(img):
+    return float((img >= BIG).sum() / np.isfinite(img).sum())
+
+
+def figure_map(expt, rep=None, solar=14.5, vmax=200.):
+    """Cloud field at one time, every cloud coloured by the pulses its system holds over its life; by default the
+    member pair (same seed) with the largest difference in the cloud area share of systems of BIG pulses or more."""
     from matplotlib.colors import LogNorm
-    M = members(expt)
+    sh = {r: [big_share(map_field(expt, rt, lab, r, solar)[2]) for rt, lab in cl.RTS] for r in range(1, 5)}
+    for r, (a, b) in sh.items():
+        print(f"rep {r}: cloud area share in systems of {BIG}+ pulses 1D {a:.2f}, 3D {b:.2f}, difference {b - a:+.2f}")
+    rep = rep or max(sh, key=lambda r: sh[r][1] - sh[r][0])
     fig, axs = plt.subplots(1, 2, figsize=(9., 5.1), sharey=True, layout="constrained")
-    cmap = plt.get_cmap("viridis").copy()
     for k, ((rt, lab), ax) in enumerate(zip(cl.RTS, axs)):
-        p, y, tc = M[(lab, rep)]
-        run = Run(run_dir(expt, rt, rep))
-        path, time, x, yy = tr.load(run.dir, "qlqi_path")
-        f = int(np.argmin(np.abs(run.lst(time) - solar)))
-        lab2d, n = mk.label_periodic(path[f] > 0.)
-        with xr.open_dataset(out_path(expt, rt, rep, 0).with_name("features.nc")) as ds:
-            ft = ds.to_dataframe()
-        npul = pd.Series(ft[ft.frame == f].track.values).map(tc.set_index("track").family).map(y.n_pulses).values.astype(float)
-        img = np.full(lab2d.shape, np.nan)
-        img[lab2d > 0] = npul[lab2d[lab2d > 0] - 1]
-        ax.pcolormesh(x / 1000., yy / 1000., np.where(img == 0., 1., np.nan), cmap=ListedColormap(["0.75"]), rasterized=True)
-        im = ax.pcolormesh(x / 1000., yy / 1000., np.where(img > 0., img, np.nan), cmap=cmap, norm=LogNorm(1., vmax), rasterized=True)
+        x, yy, img = map_field(expt, rt, lab, rep, solar)
+        ax.pcolormesh(x, yy, np.where(img == 0., 1., np.nan), cmap=ListedColormap(["0.75"]), rasterized=True)
+        im = ax.pcolormesh(x, yy, np.where(img > 0., img, np.nan), cmap="viridis", norm=LogNorm(1., vmax), rasterized=True)
         ax.set_aspect("equal")
         ax.set_xlabel("x [km]")
         ax.tick_params(labelsize=8)
         st.panel(ax, k, lab)
-        print(f"{lab}: clouds {n}, in systems with 0 / 1 / 2-9 / 10-49 / 50+ pulses: {[(npul == 0).sum(), (npul == 1).sum(), ((npul > 1) & (npul < 10)).sum(), ((npul >= 10) & (npul < 50)).sum(), (npul >= 50).sum()]}; "
-              f"cloud area share in 50+ systems {np.isin(lab2d, np.flatnonzero(npul >= 50) + 1).sum() / (lab2d > 0).sum():.2f}")
     axs[0].set_ylabel("y [km]")
     cb = fig.colorbar(im, ax=axs, orientation="horizontal", shrink=0.5, pad=0.02, extend="max")
     cb.set_label("pulses in the cloud system over its life [-]")
+    print("plotted rep", rep)
     return st.savefig(fig, expt, "fig_systems_map")
 
 
