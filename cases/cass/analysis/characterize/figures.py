@@ -1,5 +1,6 @@
 """Figures 1 (MSE profiles and parcels) and 4 (cloud-base w PDF with w_crit) for one experiment."""
 import argparse
+import functools
 import os
 from pathlib import Path
 
@@ -128,6 +129,7 @@ def ens(expt, rt, t):
     return xr.concat([d[keep] for d in m], dim="member").mean("member"), m
 
 
+@functools.lru_cache(maxsize=None)
 def composite_files(expt, rt):
     """All composite files of a configuration: (t, lst, path) sorted by time."""
     root = Path(os.environ["SCRATCH"]) / "CASS_LES" / "analysis" / "characterize" / expt / rt
@@ -135,9 +137,10 @@ def composite_files(expt, rt):
     for f in sorted(root.glob("rep_*/composite_*.nc")):
         with xr.open_dataset(f) as d:
             out.append((int(d.attrs["t_sec"]), float(d.attrs["lst_solar"]), f))
-    return out
+    return tuple(out)
 
 
+@functools.lru_cache(maxsize=None)
 def ens_hour(expt, rt, h0, h1):
     """Event-weighted mean of all composites (members and frames) with solar time in [h0, h1)."""
     acc, n = None, None
@@ -622,8 +625,8 @@ def figure6_strip(expt, vlim=4.e-3, hourly=False):
         h = []
         for rt, lab in RTS:
             if hourly:
-                e = ens_hour(expt, rt, *t)
-                pct = (e["sw"].sel(dir="parallel") / e["sw_domain"] - 1.) * 100.
+                e = ens_hour(expt, rt, *t).sel(dir="parallel")
+                pct = (e["sw"] / e["sw_domain"] - 1.) * 100.
                 l, = ax.plot(e["xl"], pct, lw=1.6, label=lab, **st.RT[lab])
             else:
                 e, m = ens(expt, rt, t)

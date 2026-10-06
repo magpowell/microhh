@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from snapshot import snapshot_times
+
 RTS = (("2stream", "1D"), ("raytracer", "3D"))
 BANDS = ((0.05, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0))
 
