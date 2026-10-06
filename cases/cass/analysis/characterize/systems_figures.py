@@ -179,9 +179,42 @@ def figure_pdfs(expt, hours=((12., 13.), (13., 14.), (14., 15.), (15., 16.)), nb
     return st.savefig(fig, expt, "fig_systems_pdfs")
 
 
+def figure_violins(expt):
+    """Multipulse system lifetime and pulses per multipulse system, all members pooled: violins on a linear axis cut
+    at the 98th percentile, with the median (line), the mean (dot) and the 90th percentile (tick)."""
+    M = members(expt)
+    rows = (("life", "multipulse system lifetime [min]"), ("n_pulses", "pulses per multipulse system [-]"))
+    fig, axs = plt.subplots(1, 2, figsize=(6.4, 3.6), layout="constrained")
+    out = []
+    for k, ((v, name), ax) in enumerate(zip(rows, axs)):
+        data = {}
+        for lab in ("1D", "3D"):
+            y = pd.concat([M[(lab, rep)][1] for rep in range(1, 5)])
+            data[lab] = y[~y.cut & (y.kind == "multipulse") & (y.lst >= WINDOW[0]) & (y.lst < WINDOW[1])][v].values.astype(float)
+        top = np.percentile(np.concatenate(list(data.values())), 98)
+        for i, lab in enumerate(("1D", "3D")):
+            d = data[lab]
+            vp = ax.violinplot(d[d <= top], positions=[i], widths=0.8, showextrema=False)
+            for body in vp["bodies"]:
+                body.set(facecolor=st.RT[lab]["color"], alpha=0.5, lw=0)
+            ax.hlines(np.median(d), i - 0.25, i + 0.25, color="k", lw=1.5)
+            ax.plot(i, d.mean(), "o", color="k", ms=4)
+            ax.hlines(np.percentile(d, 90), i - 0.1, i + 0.1, color="k", lw=1.)
+            out.append(dict(stat=name, rt=lab, n=d.size, median=np.median(d), mean=d.mean(), p75=np.percentile(d, 75), p90=np.percentile(d, 90), max=d.max()))
+        ax.set_xticks([0, 1], ["1D", "3D"])
+        ax.set_ylabel(name)
+        ax.set_ylim(0., top)
+        st.apply(ax)
+        st.panel(ax, k)
+    out = pd.DataFrame(out)
+    out.to_csv(st.outdir(expt).parent / "systems_violins.csv", index=False)
+    print(out.to_string(index=False, float_format=lambda x: f"{x:.1f}"))
+    return st.savefig(fig, expt, "fig_systems_violins")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v3")
     a = ap.parse_args()
-    for fn in (figure_bars, figure_series, figure_map, figure_pdfs):
+    for fn in (figure_bars, figure_series, figure_map, figure_pdfs, figure_violins):
         print(fn(a.expt))
