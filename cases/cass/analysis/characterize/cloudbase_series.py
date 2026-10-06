@@ -26,6 +26,7 @@ ZB_THR = 1.e-3
 EPS = {"undilute": 0., "entraining": 5.e-4}      # 1/m; the measured bulk rate is about 5e-4
 Z_TOP = 4800.                                    # sponge starts here
 ROOT_FRACS = (0.5, 0.9)
+W_BINS = np.arange(0., 12.05, 0.1)               # m/s, as in snapshot.py
 HOURS = ((12., 13.), (13., 14.), (14., 15.), (15., 16.))
 
 
@@ -48,6 +49,7 @@ def frame(run, t):
         out[f"n_{name}"], out[f"a_{name}"], out[f"w_{name}"], out[f"M_{name}"] = n, a, w, rho[kb] * a * w
         out[f"thv_{name}"] = float(f["thv"][kb][sel].mean()) - slab(f["thv"], kb) if n else np.nan
         out[f"qt_{name}"] = float(f["qt"][kb][sel].mean()) - slab(f["qt"], kb) if n else np.nan
+        out[f"hist_{name}"] = np.histogram(f["w"][kb][sel], bins=W_BINS)[0]
     for fr in ROOT_FRACS:
         k = int(np.argmin(np.abs(z - fr * z[kb])))
         for v in ("thv", "w", "qt"):
@@ -80,8 +82,13 @@ def analyse(expt, rt, rep, every=5., solar=(11.9, 16.1)):
             run = Run(run_dir(expt, rt, rep))      # load() restricts the grid; start each frame from the full run
             rows.append(frame(run, int(t)))
             print(f"{rt} rep_{rep:02d} t={int(t)} zb={rows[-1]['zb']:.0f} w_core={rows[-1].get('w_core', np.nan):.2f} M_core={rows[-1].get('M_core', np.nan):.4f}", flush=True)
+    nb = W_BINS.size - 1
+    hist = {k: np.array([r.pop(k, np.zeros(nb, dtype=int)) for r in rows]) for k in ("hist_core", "hist_cu")}
     d = pd.DataFrame(rows)
     ds = xr.Dataset.from_dataframe(d.set_index("t"))
+    ds = ds.assign_coords(w_bin=0.5 * (W_BINS[:-1] + W_BINS[1:]))
+    for k, v in hist.items():
+        ds[k] = (("t", "w_bin"), v)
     ds.attrs.update(expt=expt, rt=rt, rep=rep, every_min=every, zb_thr=ZB_THR)
     out = out_path(expt, rt, rep, 0).parent
     out.mkdir(parents=True, exist_ok=True)
@@ -121,6 +128,47 @@ def summary(expt):
     h = pd.DataFrame(rows)
     h.to_csv(res / "cloudbase_hourly.csv", index=False)
     return d, s, h
+
+
+def load_hist(expt):
+    out = {}
+    for rt, rep in itertools.product(RTS, range(1, 5)):
+        with xr.open_dataset(out_path(expt, rt, rep, 0).with_name("cloudbase_series.nc")) as ds:
+            out[(rt, rep)] = ds[["hist_core", "hist_cu", "lst", "wcrit_entraining"]].load()
+    return out
+
+
+def figure4h(expt, xmax=7.):
+    """Cloud-base updraft speed distributions pooled over each hour of the 60 s fields, with the hourly mean w_crit."""
+    import style as st
+    from style import plt
+    H = load_hist(expt)
+    edges = W_BINS
+    x = 0.5 * (edges[:-1] + edges[1:])
+    fig, axs = plt.subplots(1, len(HOURS), figsize=(3. * len(HOURS), 3.4), sharey=True, layout="constrained")
+    for k, ((h0, h1), ax) in enumerate(zip(HOURS, axs)):
+        h = []
+        for rt, lab in zip(RTS, ("1D", "3D")):
+            for tag, ls, name in (("core", "-", "core"), ("cu", "--", "cloudy updraft")):
+                pm = []
+                for rep in range(1, 5):
+                    d = H[(rt, rep)]
+                    w = (d.lst >= h0) & (d.lst < h1)
+                    c = d[f"hist_{tag}"].values[w.values].sum(axis=0)
+                    pm.append(c / max(c.sum(), 1) / np.diff(edges))
+                pm = np.array(pm)
+                ax.fill_between(x, pm.min(axis=0), pm.max(axis=0), alpha=0.2, lw=0, **st.RT[lab])
+                h.append(ax.plot(x, pm.mean(axis=0), ls=ls, lw=1.8, label=f"{lab} {name}", **st.RT[lab])[0])
+            wc = np.array([float(H[(rt, rep)].wcrit_entraining.where((H[(rt, rep)].lst >= h0) & (H[(rt, rep)].lst < h1)).mean()) for rep in range(1, 5)])
+            ax.axvspan(wc.min(), wc.max(), alpha=0.2, lw=0, **st.RT[lab])
+            h.append(ax.axvline(wc.mean(), lw=1.2, ls="-.", label=f"{lab} " + r"$w_{crit}$", **st.RT[lab]))
+        ax.set(xlim=(0., xmax), xlabel=r"vertical velocity at cloud base [m s$^{-1}$]")
+        st.apply(ax)
+        st.panel(ax, k, f"{h0:.0f}-{h1:.0f} LT")
+    axs[0].set_ylabel(r"probability density [s m$^{-1}$]")
+    axs[0].set_ylim(bottom=0.)
+    fig.legend(handles=h, ncols=6, loc="outside lower center", columnspacing=1.2)
+    return st.savefig(fig, expt, "fig4_w_pdf_hourly")
 
 
 def figure20(expt):
@@ -165,5 +213,6 @@ if __name__ == "__main__":
         print("--- hourly means, 1D, 3D and 3D over 1D")
         print(h[show].to_string(index=False, float_format=lambda v: f"{v:.3g}"))
         print(figure20(a.expt))
+        print(figure4h(a.expt))
     else:
         analyse(a.expt, a.rt, a.rep, a.every, a.solar)
