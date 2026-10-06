@@ -95,10 +95,17 @@ WIND = [
 ]
 WIND_INPUT_ARGS = ["--cass-winds"] + V3_INPUT_ARGS[1:]
 INPUT_ARGS = {"2stream_wind": WIND_INPUT_ARGS, "2stream_cass": WIND_INPUT_ARGS + ["--flux-model-density"]}
+# Sun-tracking wind (--sun-wind U): the v3 base case with a wind of speed U toward the shadow, nudged on 10 min above
+# 300 m (none below 50 m), geostrophic wind equal to the target. Root wind_sun_<U>_v3, 2stream and raytracer.
+SUN_WIND = None
+SUN = [("force", "nudgelist", "u,v,thl,qt"), ("force", "timedeplist_nudge", "u,v,thl,qt"), ("force", "swtimedep_geo", "true")]
+SUN_NUDGE = ["--nudge-wind-timescale", "600", "--nudge-wind-zbot", "50", "--nudge-wind-ztop", "300"]
 
 
 def exp_root(version: str, debug: bool, tag: str = "") -> Path:
     base = SCRATCH / "CASS_LES" / ("debug" if debug else "experiments")
+    if SUN_WIND is not None:
+        return base / (f"wind_sun_{SUN_WIND:.1f}".replace(".", "p") + f"_{version}" + (f"_{tag}" if tag else ""))
     return base / (f"{EXP_NAME}_{version}" + (f"_{tag}" if tag else ""))
 
 DEBUG_GRID = {"itot": "64", "jtot": "64", "xsize": "6400.", "ysize": "6400."}
@@ -204,6 +211,9 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False, version: str = "v3") -
         with netCDF4.Dataset(SHARED_DIR / "data" / LAND) as f:
             for key in V3_LAND_KEYS:
                 cfg.set("land_surface", key, f"{float(f.getncattr(key)):.4g}")
+        if SUN_WIND is not None:
+            for sec, key, val in SUN:
+                cfg.set(sec, key, val)
         if rt in ("2stream_wind", "2stream_cass"):
             for sec, key, val in WIND:
                 cfg.set(sec, key, val)
@@ -227,7 +237,7 @@ def merge_ini(rndseed: int, rt: str, debug: bool = False, version: str = "v3") -
 
 def setup_rep(rt: str, rep: int, dry_run: bool, debug: bool = False, version: str = "v3", input_args=None, tag=""):
     run_dir = exp_root(version, debug, tag) / rt / f"rep_{rep:02d}"
-    print(f"\n--- no_aerosols_zero_wind_{version}/{rt}/rep_{rep:02d} ---")
+    print(f"\n--- {run_dir.parent.parent.name}/{rt}/rep_{rep:02d} ---")
     if not dry_run and any(run_dir.glob("*.[0-9][0-9][0-9][0-9][0-9][0-9][0-9]")):
         raise SystemExit(f"{run_dir} already holds model output; refusing to set it up again")
 
@@ -235,7 +245,7 @@ def setup_rep(rt: str, rep: int, dry_run: bool, debug: bool = False, version: st
         run_dir.mkdir(parents=True, exist_ok=True)
 
     cfg = merge_ini(rndseed=rep, rt=rt, debug=debug, version=version)
-    winds = "CASS winds" if rt in INPUT_ARGS else "zero winds"
+    winds = f"sun-tracking wind {SUN_WIND} m/s" if SUN_WIND is not None else "CASS winds" if rt in INPUT_ARGS else "zero winds"
     if dry_run:
         print(f"  [dry] write cass.ini  (rndseed={rep}, swaerosol=false, {winds})")
     else:
@@ -256,6 +266,8 @@ def setup_rep(rt: str, rep: int, dry_run: bool, debug: bool = False, version: st
 
     if input_args is None:
         input_args = INPUT_ARGS.get(rt, V3_INPUT_ARGS) if version == "v3" else ["--zero-winds"]
+        if SUN_WIND is not None:
+            input_args = ["--sun-wind", str(SUN_WIND)] + SUN_NUDGE + V3_INPUT_ARGS[1:]
     if dry_run:
         print("  [dry] python cass_input.py " + " ".join(input_args))
         return
@@ -286,10 +298,18 @@ def main():
     parser.add_argument("--rt", nargs="+", default=None, help="subset of the radiation configurations")
     parser.add_argument("--tag", default="", help="suffix of the debug folder, for test runs (needs --debug)")
     parser.add_argument("--reps", type=int, nargs="+", default=None, help="subset of the members (default: all)")
+    parser.add_argument("--sun-wind", type=float, default=None, metavar="U",
+                        help="v3 base case with a sun-tracking wind of U m/s (root wind_sun_<U>_v3)")
     parser.add_argument("--input-args", nargs=argparse.REMAINDER, default=None,
                         help="arguments for cass_input.py, replacing the version default (must come last)")
     args = parser.parse_args()
 
+    global SUN_WIND
+    SUN_WIND = args.sun_wind
+    if SUN_WIND is not None and (args.version != "v3" or any(r not in ("2stream", "raytracer") for r in (args.rt or []))):
+        raise SystemExit("--sun-wind is for v3 with 2stream and raytracer")
+    if SUN_WIND is not None and args.rt is None:
+        args.rt = ["2stream", "raytracer"]
     if args.tag and not args.debug:
         raise SystemExit("--tag is for debug runs only")
     reps = [1] if args.debug else (args.reps or REPS)

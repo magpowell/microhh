@@ -46,6 +46,10 @@ parser.add_argument('--cass-winds', action='store_true',
                          'nudging target (time-dependent u_geo, v_geo). Needs [force] swtimedep_geo=true and '
                          'u,v in nudgelist and timedeplist_nudge.')
 parser.add_argument('--nudge-wind-timescale', type=float, default=3600., metavar='SECONDS')
+parser.add_argument('--nudge-wind-zbot', type=float, default=None, metavar='M',
+                    help='with --sun-wind: no wind nudging below this height, so the surface layer forms on its own')
+parser.add_argument('--nudge-wind-ztop', type=float, default=None, metavar='M',
+                    help='with --sun-wind: full wind nudging above this height (cosine ramp from --nudge-wind-zbot)')
 parser.add_argument('--flux-model-density', action='store_true',
                     help='Convert the CASS surface fluxes with the surface density of the model dynamics '
                          'and the latent heat of the model, so that the atmosphere receives the table values.')
@@ -297,6 +301,8 @@ if args.sun_wind is not None:
         raise RuntimeError("--sun-wind requires lat and lon in [grid] of cass.ini")
     dt_new = 600.0
     time_ls_new = np.arange(time_ls[0], time_ls[-1] + 1.0, dt_new)
+    if time_ls_new[-1] < time_ls[-1]:
+        time_ls_new = np.append(time_ls_new, time_ls[-1])   # the forcing must reach the end of the run
     thlls = np.array([np.interp(time_ls_new, time_ls, thlls[:, k]) for k in range(kmax)]).T
     qtls  = np.array([np.interp(time_ls_new, time_ls, qtls[:, k])  for k in range(kmax)]).T
     wls   = np.array([np.interp(time_ls_new, time_ls, wls[:, k])   for k in range(kmax)]).T
@@ -372,6 +378,11 @@ add_nc_var("nudgefac", ("z",), nc_group_init, nudgefac)
 if args.cass_winds:
     for name in ("nudgefac_u", "nudgefac_v"):
         add_nc_var(name, ("z",), nc_group_init, np.ones(kmax) / args.nudge_wind_timescale)
+elif args.sun_wind is not None and args.nudge_wind_ztop is not None:
+    # Wind nudging with its own factor: zero in the surface layer, full above.
+    wramp = np.clip((z - args.nudge_wind_zbot) / (args.nudge_wind_ztop - args.nudge_wind_zbot), 0., 1.)
+    for name in ("nudgefac_u", "nudgefac_v"):
+        add_nc_var(name, ("z",), nc_group_init, 0.5 * (1. - np.cos(np.pi * wramp)) / args.nudge_wind_timescale)
 
 # Aerosol initial profiles: composite-mean on LES z grid
 for name in aerosol_names:
