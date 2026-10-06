@@ -862,6 +862,15 @@ Done or queued:
   is +0.02/+0.38/+0.80/+1.13e-3 m s-2 at 12-13 to 15-16 LT in the lowest 0.3 z_b and about zero above; the buoyancy
   pressure removes two thirds of the raw buoyancy contrast; the dynamic-pressure force matters only below 0.3 z_b.
 
-Next: following individual large clouds through their lives with the 3D fields (item 6), after the hourly figure 7
-is read.
+- Life of an active cloud (`core_life.py`, `track.py --mask core`; `core_life_pulses.csv`, `core_life_shells.csv`):
+  core objects (buoyant cloudy columns, 96-98 % of which hold a rising buoyant cell in the 3D fields) tracked by
+  overlap and mapped to the shell they sit in. A pulse lasts 4.0-4.6 min on average under km-wide clouds (p90 10-13
+  min), the same in both runs until 13 LT and shorter in 3D afterwards (3.4 vs 4.6 min at 15 LT); one in five
+  pulses under km-wide clouds outlives a merge or split of its shell. A km-wide site lives 32-37 min, hosts 17-27
+  overlapping pulses, is active 90 % of the time and dies within 2 min of its last core; 3D sites host more pulses
+  (27 vs 18 at 14 LT, 21 vs 17 at 15 LT), not longer ones. No long-lived active cloud exists in either run.
+- Cloud drift (`drift.py --hourly`): clouds wider than 1 km walk toward the sun at 0.03-0.07 m s-1 in 3D (zero in
+  1D and across the sun), 50-80 m over a life; the sunward asymmetry is plume tilt and lit-flank births, not motion.
+- Cloud-base series: the entraining parcel finds no level of free convection below 4.8 km before 12.4 LT; the
+  barrier is undefined there (NaN, `lfc_<tag>` flag), not 150 J kg-1.
 Not planned: snapshot mean state at 5-min cadence; more frames for the per-cloud relations.
