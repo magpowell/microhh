@@ -47,7 +47,7 @@ import pandas as pd
 from pathlib import Path
 
 # ── analysis utilities (sibling module) ───────────────────────────────────────
-_ANALYSIS_DIR = Path(__file__).parent.parent
+_ANALYSIS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(_ANALYSIS_DIR))
 from cass_analysis import (
     load_stats, compute_z_sl,

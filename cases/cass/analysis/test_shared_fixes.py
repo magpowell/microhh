@@ -7,7 +7,7 @@ import numpy as np
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent / "updrafts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "archive" / "updrafts"))
 import cass_analysis as ca
 import diagnostics as dg
 

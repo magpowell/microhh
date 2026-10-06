@@ -61,7 +61,7 @@ import matplotlib.dates as mdates
 from matplotlib.lines import Line2D
 from pathlib import Path
 
-sys.path.insert(0, str(Path.cwd()))
+sys.path.insert(0, str(HERE.parent))      # cases/cass/analysis: library and notebooks
 from cass_analysis import (
     load_stats, load_stats_ensemble,
     lwp_integral,
@@ -645,7 +645,7 @@ cs_veg_cells = [
 ]
 
 if "cs_veg" in _TARGETS:
-    with open(HERE / "cs_veg_comparison.ipynb", "w") as f:
+    with open(HERE.parent / "cs_veg_comparison.ipynb", "w") as f:
         json.dump(nb(cs_veg_cells), f, indent=1)
     print("Wrote cs_veg_comparison.ipynb")
 
@@ -695,7 +695,7 @@ sm_cells = [
 ]
 
 if "soil_moisture" in _TARGETS:
-    with open(HERE / "soil_moisture_comparison.ipynb", "w") as f:
+    with open(HERE.parent / "soil_moisture_comparison.ipynb", "w") as f:
         json.dump(nb(sm_cells), f, indent=1)
     print("Wrote soil_moisture_comparison.ipynb")
 
@@ -749,7 +749,7 @@ wu_cells = [
 ]
 
 if "wind_u" in _TARGETS:
-    with open(HERE / "wind_u_comparison.ipynb", "w") as f:
+    with open(HERE.parent / "wind_u_comparison.ipynb", "w") as f:
         json.dump(nb(wu_cells), f, indent=1)
     print("Wrote wind_u_comparison.ipynb")
 

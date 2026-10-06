@@ -20,7 +20,7 @@ import time
 import warnings
 from pathlib import Path
 
-_HERE = Path(__file__).resolve().parent
+_HERE = Path(__file__).resolve().parent.parent      # cases/cass/analysis
 sys.path.insert(0, str(_HERE))
 
 from cass_analysis import conditioned_means_ensemble, cache_is_current, write_stamp  # noqa: E402

@@ -36,7 +36,7 @@ import xarray as xr
 import tobac
 import tobac.merge_split  # noqa: F401  (submodule must be imported explicitly)
 import sys
-sys.path.insert(0, "/global/homes/m/mpowell/repos/microhh/cases/cass/analysis")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from cass_analysis import solar_azimuth_deg, sim_time_to_lst, cache_is_current, stamp_cache  # noqa: E402
 
 

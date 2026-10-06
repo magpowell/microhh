@@ -12,7 +12,7 @@ Not a reusable tool — delete after the distance is chosen.
 import sys
 import warnings
 import numpy as np
-sys.path.insert(0, "/global/homes/m/mpowell/repos/microhh/cases/cass/analysis/t_scale")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from compute_cloud_lifetimes import load_qlp, detect_and_track, aggregate_tracks
 import tobac

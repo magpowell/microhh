@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import sys
-sys.path.insert(0, "/global/homes/m/mpowell/repos/microhh/cases/cass/analysis")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from cass_analysis import LST_OFFSET, cache_is_current, stamp_cache  # noqa: E402  (local apparent solar time)
 
 

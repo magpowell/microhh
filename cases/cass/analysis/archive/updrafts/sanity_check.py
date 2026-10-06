@@ -38,8 +38,8 @@ import xarray as xr
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
-if str(_HERE.parent) not in sys.path:
-    sys.path.insert(0, str(_HERE.parent))
+if str(_HERE.parent.parent) not in sys.path:
+    sys.path.insert(0, str(_HERE.parent.parent))
 
 from cass_analysis import load_stats, load_3d_nc, sim_time_to_lst  # noqa: E402
 from diagnostics import (                                          # noqa: E402

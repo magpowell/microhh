@@ -33,7 +33,7 @@ import xarray as xr
 
 # ── Shared imports from parent analysis package ──────────────────────────────
 import sys as _sys
-_sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from cass_analysis import (zenith_angle, CASS_LAT as LAT, CASS_DOY as DOY, LST_OFFSET, XL_GRID, dump_t_to_lst,
                            cache_is_current, require_current_cache, stamp_cache)
 

@@ -20,7 +20,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-_ANALYSIS_DIR = Path(__file__).parent.parent
+_ANALYSIS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(_ANALYSIS_DIR))
 
 from cass_analysis import (
