@@ -1,0 +1,174 @@
+"""Life of an active cloud: core objects tracked through the one-minute fields and the shells (cloud objects) they sit in.
+
+python core_life.py --expt no_aerosols_zero_wind_v3 --rt 2stream --rep 1      (core_life.nc: one row per core object per frame)
+python core_life.py --expt no_aerosols_zero_wind_v3 --summary                 (core_life_pulses.csv, core_life_shells.csv)
+A core object is a connected set of columns holding buoyant cloud (qlqicore_max_thv_prime; 96-98 % of them hold a
+rising buoyant cloudy cell in the 3D fields), tracked by overlap like the clouds (track.py --mask core). Every core
+object lies inside one cloud object, its shell. A pulse is one core track; its shell may change identity by merging
+or splitting while the pulse goes on. The active life of a shell is the frames in which it holds a core.
+"""
+import argparse
+import itertools
+
+import numpy as np
+import pandas as pd
+import xarray as xr
+from scipy import ndimage
+
+import masks as mk
+import track as tr
+from les_io import Run
+from lifetime import ensemble
+from snapshot import out_path, run_dir
+
+RTS = (("2stream", "1D"), ("raytracer", "3D"))
+HOURS = (12., 13., 14., 15., 16.)
+D_BINS = (0., 500., 1000., 1.e9)                  # shell width classes [m]
+D_LABELS = ("<500", "500-1000", ">=1000")
+
+
+def by_frame(feats):
+    """Track id of every label of every frame (labels in the order the tracker numbered them)."""
+    return {f: g.track.values for f, g in feats.groupby("frame")}
+
+
+def core_mask(path, core):
+    return (path > 0.) & (core > 0.) & (core < tr.FILL)
+
+
+def frame_map(path_f, core_f, cloud_tid, core_tid):
+    """Rows (core_track, cloud_track, core_cols, cloud_cols) of one frame; a core object lies in one cloud object."""
+    lab_c, n_c = mk.label_periodic(path_f > 0.)
+    lab_k, n_k = mk.label_periodic(core_mask(path_f, core_f))
+    if n_k == 0:
+        return None
+    idx = np.arange(1, n_k + 1)
+    shell = ndimage.minimum(lab_c, lab_k, idx).astype(int)
+    assert np.array_equal(shell, ndimage.maximum(lab_c, lab_k, idx)) and shell.min() > 0
+    return pd.DataFrame(dict(core_track=core_tid[:n_k], cloud_track=cloud_tid[shell - 1],
+                             core_cols=mk.object_areas(lab_k, n_k), cloud_cols=mk.object_areas(lab_c, n_c)[shell - 1]))
+
+
+def build(path, core, feats_cloud, feats_core):
+    """Core-to-shell map for all frames."""
+    tc, tk = by_frame(feats_cloud), by_frame(feats_core)
+    out = []
+    for f in range(path.shape[0]):
+        if f not in tk:
+            continue
+        m = frame_map(path[f], core[f], tc[f], tk[f])
+        if m is not None:
+            out.append(m.assign(frame=f))
+    return pd.concat(out, ignore_index=True)
+
+
+def pulses(m, tracks_core, lst, dx, dy):
+    """One row per core track: duration, shells it lived in, whether it outlived a shell identity, its shell's width."""
+    g = m.groupby("core_track")
+    p = pd.DataFrame(dict(frames=g.size(), frame_first=g.frame.min(), n_shells=g.cloud_track.nunique(),
+                          cols_max=g.core_cols.max(), shell_cols_max=g.cloud_cols.max()))
+    t = tracks_core.set_index("track")
+    p = p.join(t[["birth", "death", "merges_in", "splits_out"]])
+    p = p[(p.birth != "start") & (p.death != "end")]
+    p["untouched"] = (p.merges_in == 0) & (p.splits_out == 0) & (p.birth == "new") & (p.death == "gone")
+    p["shell_changed"] = p.n_shells > 1
+    p["shell_D"] = mk.equivalent_diameter(p.shell_cols_max.values, dx, dy)
+    p["lst"] = lst[p.frame_first.values]
+    return p.reset_index()
+
+
+def shells(m, tracks_cloud, lst, dx, dy):
+    """One row per cloud track: pulses hosted, active frames, frames before the first and after the last core."""
+    g = m.groupby("cloud_track")
+    s = pd.DataFrame(dict(n_pulses=g.core_track.nunique(), active=g.frame.nunique(), core_first=g.frame.min(), core_last=g.frame.max()))
+    t = tracks_cloud.set_index("track")
+    t = t[(t.birth != "start") & (t.death != "end")]
+    s = t[["frame_first", "frame_last", "area_max", "merges_in", "splits_out"]].join(s)
+    s[["n_pulses", "active"]] = s[["n_pulses", "active"]].fillna(0).astype(int)
+    s["frames"] = s.frame_last - s.frame_first + 1
+    s["lead"] = s.core_first - s.frame_first
+    s["decay"] = s.frame_last - s.core_last
+    s["D"] = mk.equivalent_diameter(s.area_max.values / (dx * dy), dx, dy)
+    s["lst"] = lst[s.frame_first.values.astype(int)]
+    return s.reset_index()
+
+
+def analyse(expt, rt, rep):
+    rd = run_dir(expt, rt, rep)
+    run = Run(rd)
+    path, time, x, y = tr.load(rd, "qlqi_path")
+    core = tr.load(rd, "qlqicore_max_thv_prime")[0]
+    res = out_path(expt, rt, rep, 0).parent
+    with xr.open_dataset(res / "features.nc") as ds:
+        fc = ds.to_dataframe()
+    with xr.open_dataset(res / "features_core.nc") as ds:
+        fk = ds.to_dataframe()
+    m = build(path, core, fc, fk)
+    m["time"] = time[m.frame.values]
+    m["lst"] = run.lst(m.time.values)
+    ds = xr.Dataset.from_dataframe(m)
+    ds.attrs.update(expt=expt, rt=rt, rep=rep, dx=float(x[1] - x[0]), dy=float(y[1] - y[0]))
+    ds.to_netcdf(res / "core_life.nc")
+    return ds
+
+
+def tables(expt, rt, rep):
+    res = out_path(expt, rt, rep, 0).parent
+    with xr.open_dataset(res / "core_life.nc") as ds:
+        m, dx, dy = ds.to_dataframe(), float(ds.attrs["dx"]), float(ds.attrs["dy"])
+    run = Run(run_dir(expt, rt, rep))
+    time = tr.load(run.dir, "qlqi_path")[1]
+    lst = run.lst(time)
+    with xr.open_dataset(res / "tracks_core.nc") as ds:
+        tk = ds.to_dataframe()
+    with xr.open_dataset(res / "tracks.nc") as ds:
+        tc = ds.to_dataframe()
+    return pulses(m, tk, lst, dx, dy), shells(m, tc, lst, dx, dy)
+
+
+def summary(expt):
+    P, S = [], []
+    for (rt, lab), rep in itertools.product(RTS, range(1, 5)):
+        p, s = tables(expt, rt, rep)
+        p["hour"], s["hour"] = np.floor(p.lst), np.floor(s.lst)
+        p["cls"] = pd.cut(p.shell_D, D_BINS, labels=D_LABELS, right=False)
+        s["cls"] = pd.cut(s.D, D_BINS, labels=D_LABELS, right=False)
+        for (h, c), g in p[(p.hour >= HOURS[0]) & (p.hour < HOURS[-1])].groupby(["hour", "cls"], observed=True):
+            u = g[g.untouched]
+            P.append(dict(rt=rt, rep=rep, hour=int(h), cls=c, n=len(g), dur_mean=g.frames.mean(), dur_median=g.frames.median(), dur_p90=g.frames.quantile(.9),
+                          shell_changed=g.shell_changed.mean(), untouched=g.untouched.mean(), dur_untouched=u.frames.mean(), dur_untouched_p90=u.frames.quantile(.9)))
+        for (h, c), g in s[(s.hour >= HOURS[0]) & (s.hour < HOURS[-1])].groupby(["hour", "cls"], observed=True):
+            a = g[g.n_pulses > 0]
+            S.append(dict(rt=rt, rep=rep, hour=int(h), cls=c, n=len(g), ever_active=(g.n_pulses > 0).mean(), frames=g.frames.mean(),
+                          n_pulses=a.n_pulses.mean(), multi_pulse=(a.n_pulses > 1).mean(), active=a.active.mean(), active_frac=(a.active / a.frames).mean(),
+                          lead=a.lead.mean(), decay=a.decay.mean()))
+    P, S = pd.DataFrame(P), pd.DataFrame(S)
+    res = out_path(expt, "2stream", 1, 0).parents[2]
+    P.to_csv(res / "core_life_pulses_long.csv", index=False); S.to_csv(res / "core_life_shells_long.csv", index=False)
+    eP = ensemble(P, ["hour", "cls"], [c for c in P.columns if c not in ("rt", "rep", "hour", "cls")])
+    eS = ensemble(S, ["hour", "cls"], [c for c in S.columns if c not in ("rt", "rep", "hour", "cls")])
+    eP.to_csv(res / "core_life_pulses.csv"); eS.to_csv(res / "core_life_shells.csv")
+    return eP, eS
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--expt", default="no_aerosols_zero_wind_v3")
+    ap.add_argument("--rt", choices=[r for r, _ in RTS])
+    ap.add_argument("--rep", type=int)
+    ap.add_argument("--summary", action="store_true")
+    a = ap.parse_args()
+    pd.set_option("display.width", 250); pd.set_option("display.max_columns", 60)
+    fmt = lambda v: f"{v:.2f}"
+    if a.summary:
+        eP, eS = summary(a.expt)
+        show = lambda e, cols: e.loc[:, [(c, k) for c in cols for k in ("1D", "3D", "d_over_se")]].to_string(float_format=fmt)
+        print("--- pulses (core tracks) by hour of birth and shell width: duration [min], share that outlived a shell identity, untouched share and duration")
+        print(show(eP, ["n", "dur_mean", "dur_p90", "shell_changed", "untouched", "dur_untouched"]))
+        print("\n--- shells (cloud tracks) by hour of birth and width: ever active, pulses hosted, active frames and fraction, frames before the first and after the last core")
+        print(show(eS, ["n", "ever_active", "frames", "n_pulses", "multi_pulse", "active", "active_frac", "lead", "decay"]))
+    else:
+        ds = analyse(a.expt, a.rt, a.rep)
+        p, s = tables(a.expt, a.rt, a.rep)
+        print(f"{a.rt} rep_{a.rep:02d}: {ds.sizes['index']} core-frames, {len(p)} pulses (median {p.frames.median():.0f} min, "
+              f"{p.shell_changed.mean():.2f} outlived a shell), {len(s)} shells, {(s.n_pulses > 0).mean():.2f} ever active", flush=True)
