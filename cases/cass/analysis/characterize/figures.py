@@ -625,27 +625,15 @@ def figure22(expt):
     return st.savefig(fig, expt, "fig22_catchment")
 
 
-def _lanes(spans):
-    """Lane index of every (start, end) span so that overlapping spans sit in different lanes."""
-    ends, out = [], []
-    for a, b in spans:
-        k = next((i for i, e in enumerate(ends) if e < a), None)
-        if k is None:
-            ends.append(b); k = len(ends) - 1
-        else:
-            ends[k] = b
-        out.append(k)
-    return np.array(out), len(ends)
-
-
 def _ecdf(ax, x, **kw):
     x = np.sort(np.asarray(x, dtype=float))
     return ax.step(x, np.arange(1, x.size + 1) / x.size, where="post", **kw)[0]
 
 
-def figure23(expt, rep=1, n_sites=6, dmin=1000.):
-    """Sites against pulses: the longest km-wide sites of one member as chains of core pulses; distributions of pulse
-    duration, of the longest pulse a site held and of site life; pulses per ten minutes of site life by hour."""
+def figure23(expt, rep=1, n_sites=10, dmin=1000.):
+    """Sites against pulses: km-wide sites of one member (median life upward) with the longest core each held and the
+    starts of its other cores; distributions of pulse duration, of the longest core a site held and of site life;
+    pulses per ten minutes of site life by hour."""
     import core_life as cl
     fig, axs = plt.subplots(1, 3, figsize=(12.5, 3.9), width_ratios=(1.5, 1, 1), layout="constrained")
     ax, y, ticks = axs[0], 0, []
@@ -653,7 +641,7 @@ def figure23(expt, rep=1, n_sites=6, dmin=1000.):
     for rt, lab in RTS:
         pulses[lab], sites[lab] = [], []
         for r in range(1, 5):
-            p, s = cl.tables(expt, rt, r)
+            p, s, _ = cl.tables(expt, rt, r)
             w = lambda d: (d.lst >= HOURS[0][0]) & (d.lst < HOURS[-1][1])
             pulses[lab].append(p[w(p) & (p.shell_D >= dmin)])
             sites[lab].append(s[w(s) & (s.D >= dmin)])
@@ -661,25 +649,30 @@ def figure23(expt, rep=1, n_sites=6, dmin=1000.):
                 continue
             with xr.open_dataset(out_path(expt, rt, r, 0).parent / "core_life.nc") as ds:
                 m = ds.to_dataframe()
-            for _, site in sites[lab][-1].nlargest(n_sites, "frames").sort_values("frames").iterrows():
-                sp = m[m.cloud_track == site.cloud_track].groupby("core_track").frame.agg(["min", "max"]).sort_values("min").values - site.frame_first
-                lane, nl = _lanes(sp)
+            ss = sites[lab][-1].sort_values("frames")
+            pick = ss.iloc[np.unique(np.round(np.linspace(0.5, 1., n_sites) * (len(ss) - 1)).astype(int))]     # median life upward, even in rank
+            for _, site in pick.iterrows():
+                sp = m[m.cloud_track == site.cloud_track].groupby("core_track").frame.agg(["min", "max"]) - site.frame_first
+                j = (sp["max"] - sp["min"]).idxmax()
                 ax.barh(y, site.frames, height=0.8, color="0.9", lw=0)
-                ax.barh(y - 0.4 + (lane + 0.5) * 0.8 / nl, sp[:, 1] - sp[:, 0] + 1, left=sp[:, 0], height=0.8 / nl, lw=0, **st.RT[lab])
+                ax.barh(y, sp.loc[j, "max"] - sp.loc[j, "min"] + 1, left=sp.loc[j, "min"], height=0.45, lw=0, **st.RT[lab])
+                ax.vlines(sp.drop(j)["min"].values + 0.5, y + 0.25, y + 0.4, lw=0.7, **st.RT[lab])
                 y += 1
-            ticks.append((y - 0.5 * n_sites - 0.5, lab))
+            ticks.append((y - 0.5 * len(pick) - 0.5, lab))
             y += 1
     ax.set_yticks([t for t, _ in ticks], [l for _, l in ticks], fontweight="bold")
     ax.tick_params(axis="y", length=0)
     ax.set_xlabel("time since the site appeared [min]")
     ax.set_xlim(left=0)
+    ax.legend(handles=[plt.Rectangle((0, 0), 1, 1, color="0.9"), plt.Rectangle((0, 0), 1, 1, color="0.3"), plt.Line2D([], [], color="0.3", lw=0.7)],
+              labels=["site", "longest core", "start of another core"], loc="lower right", fontsize=8)
     st.apply(ax)
     st.panel(ax, 0)
     ax = axs[1]
     h = []
     for lab in ("1D", "3D"):
         p, s = pd.concat(pulses[lab]), pd.concat(sites[lab])
-        for x, ls, name in ((p.frames, "-", "pulse"), (s.longest, "--", "longest pulse of a site"), (s.frames, ":", "site")):
+        for x, ls, name in ((p.frames, "-", "core"), (s.longest, "--", "longest core of a site"), (s.frames, ":", "site")):
             h.append(_ecdf(ax, x, ls=ls, lw=1.6, label=f"{lab} {name}", **st.RT[lab]))
     ax.set(xscale="log", xlim=(1., 150.), ylim=(0., 1.), xlabel="duration [min]", ylabel="cumulative fraction [-]")
     st.apply(ax)

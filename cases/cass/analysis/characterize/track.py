@@ -146,12 +146,12 @@ def load(d, var):
         return ds[var].values.astype(np.float32), ds["time"].values.astype(float), ds["x"].values, ds["y"].values
 
 
-def analyse(expt, rt, rep, thr=0., mask="cloud"):
+def analyse(expt, rt, rep, thr=0., mask="cloud", core_thr=0.):
     d = run_dir(expt, rt, rep)
     path, time, x, y = load(d, "qlqi_path")
     base, top, core = (load(d, v)[0] for v in ("qlqi_base", "qlqi_top", "qlqicore_max_thv_prime"))
     if mask == "core":
-        path = np.where((core > 0.) & (core < FILL), path, 0.)
+        path = np.where((core > core_thr) & (core < FILL), path, 0.)
     feats, tracks = track(path, base, top, core, time, float(x[1] - x[0]), float(y[1] - y[0]), thr)
     lst = Run(d).lst(time)
     feats["lst"] = lst[feats["frame"].values]
@@ -159,7 +159,7 @@ def analyse(expt, rt, rep, thr=0., mask="cloud"):
     attrs = dict(expt=expt, rt=rt, rep=rep, path_thr=thr, mask=mask, dt=float(time[1] - time[0]))
     out = out_path(expt, rt, rep, 0).parent
     out.mkdir(parents=True, exist_ok=True)
-    tag = ("" if thr == 0. else f"_thr{thr:g}") + ("" if mask == "cloud" else f"_{mask}")
+    tag = ("" if thr == 0. else f"_thr{thr:g}") + ("" if mask == "cloud" else f"_{mask}") + ("" if core_thr == 0. else f"{core_thr:g}")
     for name, df in (("features", feats), ("tracks", tracks)):
         ds = xr.Dataset.from_dataframe(df)
         ds.attrs.update(attrs)
@@ -174,8 +174,9 @@ if __name__ == "__main__":
     ap.add_argument("--rep", type=int, required=True)
     ap.add_argument("--thr", type=float, default=0.)
     ap.add_argument("--mask", default="cloud", choices=["cloud", "core"])
+    ap.add_argument("--core-thr", type=float, default=0., help="thv excess a core column needs [K]")
     a = ap.parse_args()
-    f, t = analyse(a.expt, a.rt, a.rep, a.thr, a.mask)
+    f, t = analyse(a.expt, a.rt, a.rep, a.thr, a.mask, a.core_thr)
     c = t[(t.birth == "new") & (t.death == "gone")]
     print(f"{a.rt} rep_{a.rep:02d} features={len(f)} tracks={len(t)} simple={len(c)} "
           f"median lifetime all={t.lifetime.median() / 60:.1f} simple={c.lifetime.median() / 60:.1f} min", flush=True)

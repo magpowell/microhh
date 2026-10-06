@@ -32,14 +32,14 @@ def by_frame(feats):
     return {f: g.track.values for f, g in feats.groupby("frame")}
 
 
-def core_mask(path, core):
-    return (path > 0.) & (core > 0.) & (core < tr.FILL)
+def core_mask(path, core, thr=0.):
+    return (path > 0.) & (core > thr) & (core < tr.FILL)
 
 
-def frame_map(path_f, core_f, cloud_tid, core_tid):
+def frame_map(path_f, core_f, cloud_tid, core_tid, thr=0.):
     """Rows (core_track, cloud_track, core_cols, cloud_cols) of one frame; a core object lies in one cloud object."""
     lab_c, n_c = mk.label_periodic(path_f > 0.)
-    lab_k, n_k = mk.label_periodic(core_mask(path_f, core_f))
+    lab_k, n_k = mk.label_periodic(core_mask(path_f, core_f, thr))
     if n_k == 0:
         return None
     idx = np.arange(1, n_k + 1)
@@ -49,17 +49,18 @@ def frame_map(path_f, core_f, cloud_tid, core_tid):
                              core_cols=mk.object_areas(lab_k, n_k), cloud_cols=mk.object_areas(lab_c, n_c)[shell - 1]))
 
 
-def build(path, core, feats_cloud, feats_core):
-    """Core-to-shell map for all frames."""
+def build(path, core, feats_cloud, feats_core, thr=0., min_cells=1):
+    """Core-to-shell map for all frames; core tracks of fewer than min_cells columns summed over their frames are dropped."""
     tc, tk = by_frame(feats_cloud), by_frame(feats_core)
     out = []
     for f in range(path.shape[0]):
         if f not in tk:
             continue
-        m = frame_map(path[f], core[f], tc[f], tk[f])
+        m = frame_map(path[f], core[f], tc[f], tk[f], thr)
         if m is not None:
             out.append(m.assign(frame=f))
-    return pd.concat(out, ignore_index=True)
+    m = pd.concat(out, ignore_index=True)
+    return m[m.groupby("core_track").core_cols.transform("sum") >= min_cells].reset_index(drop=True)
 
 
 def pulses(m, tracks_core, lst, dx, dy):
@@ -95,7 +96,11 @@ def shells(m, tracks_cloud, lst, dx, dy):
     return s.reset_index().rename(columns={"track": "cloud_track"})
 
 
-def analyse(expt, rt, rep):
+def tag_of(thr):
+    return "" if thr == 0. else f"{thr:g}"
+
+
+def analyse(expt, rt, rep, thr=0., min_cells=1):
     rd = run_dir(expt, rt, rep)
     run = Run(rd)
     path, time, x, y = tr.load(rd, "qlqi_path")
@@ -103,35 +108,69 @@ def analyse(expt, rt, rep):
     res = out_path(expt, rt, rep, 0).parent
     with xr.open_dataset(res / "features.nc") as ds:
         fc = ds.to_dataframe()
-    with xr.open_dataset(res / "features_core.nc") as ds:
+    with xr.open_dataset(res / f"features_core{tag_of(thr)}.nc") as ds:
         fk = ds.to_dataframe()
-    m = build(path, core, fc, fk)
+    m = build(path, core, fc, fk, thr, min_cells)
     m["time"] = time[m.frame.values]
     m["lst"] = run.lst(m.time.values)
     ds = xr.Dataset.from_dataframe(m)
-    ds.attrs.update(expt=expt, rt=rt, rep=rep, dx=float(x[1] - x[0]), dy=float(y[1] - y[0]))
-    ds.to_netcdf(res / "core_life.nc")
+    ds.attrs.update(expt=expt, rt=rt, rep=rep, dx=float(x[1] - x[0]), dy=float(y[1] - y[0]), core_thr=thr, min_cells=min_cells)
+    ds.to_netcdf(res / f"core_life{tag_of(thr)}.nc")
     return ds
 
 
-def tables(expt, rt, rep):
+def tables(expt, rt, rep, thr=0.):
     res = out_path(expt, rt, rep, 0).parent
-    with xr.open_dataset(res / "core_life.nc") as ds:
+    with xr.open_dataset(res / f"core_life{tag_of(thr)}.nc") as ds:
         m, dx, dy = ds.to_dataframe(), float(ds.attrs["dx"]), float(ds.attrs["dy"])
     run = Run(run_dir(expt, rt, rep))
     time = tr.load(run.dir, "qlqi_path")[1]
     lst = run.lst(time)
-    with xr.open_dataset(res / "tracks_core.nc") as ds:
+    with xr.open_dataset(res / f"tracks_core{tag_of(thr)}.nc") as ds:
         tk = ds.to_dataframe()
     with xr.open_dataset(res / "tracks.nc") as ds:
         tc = ds.to_dataframe()
-    return pulses(m, tk, lst, dx, dy), shells(m, tc, lst, dx, dy)
+    p, s = pulses(m, tk, lst, dx, dy), shells(m, tc, lst, dx, dy)
+    p["family"] = p.core_track.map(m.groupby("core_track").cloud_track.first().map(tc.set_index("track").family))
+    return p, s, tc
+
+
+def systems(p, tc, dx, dy):
+    """One row per cloud system (all clouds connected in space and time): lifetime, widest cloud, pulses, class."""
+    g = tc.groupby("family")
+    y = pd.DataFrame(dict(life=g.family_lifetime.first() / 60., D=mk.equivalent_diameter(g.area_max.max().values / (dx * dy), dx, dy), lst=g.lst_first.min(),
+                          cut=g.birth.agg(lambda b: (b == "start").any()) | g.death.agg(lambda d: (d == "end").any())))
+    pg = p.groupby("family")
+    y = y.join(pd.DataFrame(dict(n_pulses=pg.size(), pulse_mean=pg.frames.mean(), pulse_max=pg.frames.max())))
+    y["n_pulses"] = y.n_pulses.fillna(0).astype(int)
+    y["kind"] = np.select([y.n_pulses == 0, y.n_pulses == 1], ["passive", "single pulse"], "multipulse")
+    return y[~y.cut]
+
+
+def systems_summary(expt, thr):
+    rows = []
+    for (rt, lab), rep in itertools.product(RTS, range(1, 5)):
+        p, s, tc = tables(expt, rt, rep, thr)
+        with xr.open_dataset(out_path(expt, rt, rep, 0).parent / f"core_life{tag_of(thr)}.nc") as ds:
+            dx, dy = float(ds.attrs["dx"]), float(ds.attrs["dy"])
+        y = systems(p, tc, dx, dy)
+        y = y[(y.lst >= HOURS[0]) & (y.lst < HOURS[-1])]
+        pw = p[(p.lst >= HOURS[0]) & (p.lst < HOURS[-1])]
+        for name, sel in (("all", y), ("with a cloud >= 1 km", y[y.D >= 1000.])):
+            for kind, g in sel.groupby("kind"):
+                rows.append(dict(rt=rt, rep=rep, systems=name, kind=kind, n=len(g), life=g.life.mean(), life_p90=g.life.quantile(.9), n_pulses=g.n_pulses.mean(),
+                                 pulse_mean=g.pulse_mean.mean(), pulse_longest=g.pulse_max.mean()))
+        rows.append(dict(rt=rt, rep=rep, systems="pulses", kind="all pulses", n=len(pw), life=pw.frames.mean(), life_p90=pw.frames.quantile(.9)))
+    d = pd.DataFrame(rows)
+    e = ensemble(d, ["systems", "kind"], ["n", "life", "life_p90", "n_pulses", "pulse_mean", "pulse_longest"])
+    e.to_csv(out_path(expt, "2stream", 1, 0).parents[2] / f"core_life_systems{tag_of(thr)}.csv")
+    return e
 
 
 def summary(expt):
     P, S = [], []
     for (rt, lab), rep in itertools.product(RTS, range(1, 5)):
-        p, s = tables(expt, rt, rep)
+        p, s, _ = tables(expt, rt, rep)
         p["hour"], s["hour"] = np.floor(p.lst), np.floor(s.lst)
         p["cls"] = pd.cut(p.shell_D, D_BINS, labels=D_LABELS, right=False)
         s["cls"] = pd.cut(s.D, D_BINS, labels=D_LABELS, right=False)
@@ -160,10 +199,16 @@ if __name__ == "__main__":
     ap.add_argument("--rt", choices=[r for r, _ in RTS])
     ap.add_argument("--rep", type=int)
     ap.add_argument("--summary", action="store_true")
+    ap.add_argument("--systems", action="store_true", help="cloud systems and their pulses (Heus and Seifert 2013 terms)")
+    ap.add_argument("--core-thr", type=float, default=0.)
+    ap.add_argument("--min-cells", type=int, default=1)
     a = ap.parse_args()
     pd.set_option("display.width", 250); pd.set_option("display.max_columns", 60)
     fmt = lambda v: f"{v:.2f}"
-    if a.summary:
+    if a.systems:
+        e = systems_summary(a.expt, a.core_thr)
+        print(e.loc[:, [(c, k) for c in ("n", "life", "life_p90", "n_pulses", "pulse_mean", "pulse_longest") for k in ("1D", "3D", "d_over_se")]].to_string(float_format=fmt))
+    elif a.summary:
         eP, eS = summary(a.expt)
         show = lambda e, cols: e.loc[:, [(c, k) for c in cols for k in ("1D", "3D", "d_over_se")]].to_string(float_format=fmt)
         print("--- pulses (core tracks) by hour of birth and shell width: duration [min], share that outlived a shell identity, untouched share and duration")
@@ -175,7 +220,7 @@ if __name__ == "__main__":
         big[("pulse", "1D")], big[("pulse", "3D")] = eP.xs(D_LABELS[-1], level="cls")[("dur_mean", "1D")], eP.xs(D_LABELS[-1], level="cls")[("dur_mean", "3D")]
         print(big.loc[:, [(c, k) for c in ("frames", "longest", "longest_p90", "n_pulses", "rate", "pulse") for k in ("1D", "3D")]].to_string(float_format=fmt))
     else:
-        ds = analyse(a.expt, a.rt, a.rep)
-        p, s = tables(a.expt, a.rt, a.rep)
+        ds = analyse(a.expt, a.rt, a.rep, a.core_thr, a.min_cells)
+        p, s, _ = tables(a.expt, a.rt, a.rep, a.core_thr)
         print(f"{a.rt} rep_{a.rep:02d}: {ds.sizes['index']} core-frames, {len(p)} pulses (median {p.frames.median():.0f} min, "
               f"{p.shell_changed.mean():.2f} outlived a shell), {len(s)} shells, {(s.n_pulses > 0).mean():.2f} ever active", flush=True)
