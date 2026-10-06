@@ -837,3 +837,22 @@ Order chosen so the headline statements come first.
 
 Tape archive of v3 (statistics, 60 s fields, cross-sections, restart files at the analysis times) before the 8-week
 scratch purge; then delete from scratch.
+
+### 21b. Analyses on the 60 s fields (decided 2026-10-05, user)
+
+The v3 runs hold u, v, w, thl, qt and the model's pressure every 60 s between solar 11.97 and 16.06 (240 levels to
+6 km). The pressure split against the saved p shows the advection reconstruction of the dynamic pressure force was
+noisy (correlation 0.46 with the saved one, twice the amplitude), so the v2 "half buoyancy, half dynamic pressure"
+split of the root work is withdrawn until the saved-pressure composites are read.
+
+Done or queued:
+- Composites every 5 min with the saved pressure, pooled by hour (`composite.py --every 5`, `figures.ens_hour`,
+  figures 6 strip and 7 hourly).
+- Cloud-base series every 5 min (`cloudbase_series.py`: cloud base, core and cloudy-updraft speed, area and mass
+  flux, root anomalies, barrier of the mean cloudy-updraft parcel; figure 20).
+- Open-ground series every 5 min (`open_ground.py --every 5`, `--series`: barrier and low-level divergence over lit
+  open ground against the lit-ground birth rate; figure 21).
+
+Next, in this order: the catchment map from the horizontal buoyancy-pressure force of the hourly composites (item 5);
+following individual large clouds through their lives with the 3D fields (item 6), after the hourly figure 7 is read.
+Not planned: snapshot mean state at 5-min cadence; more frames for the per-cloud relations.
