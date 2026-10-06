@@ -158,6 +158,7 @@ def analyse(expt, rt, rep, thr=0., mask="cloud"):
     tracks["lst_first"] = lst[tracks["frame_first"].values]
     attrs = dict(expt=expt, rt=rt, rep=rep, path_thr=thr, mask=mask, dt=float(time[1] - time[0]))
     out = out_path(expt, rt, rep, 0).parent
+    out.mkdir(parents=True, exist_ok=True)
     tag = ("" if thr == 0. else f"_thr{thr:g}") + ("" if mask == "cloud" else f"_{mask}")
     for name, df in (("features", feats), ("tracks", tracks)):
         ds = xr.Dataset.from_dataframe(df)
