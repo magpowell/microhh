@@ -1,6 +1,6 @@
 """Catchment of a cloud root from the low-level horizontal pressure forces of the hourly composites.
 
-python catchment.py --expt no_aerosols_zero_wind_v3        (catchment.csv; figure 22 through figures.figure22)
+python catchment.py --expt no_aerosols_zero_wind_v3        (catchment.csv)
 Along the sun-parallel slice (r positive away from the sun), the horizontal buoyancy-pressure and dynamic-pressure
 forces averaged over LOW (fractions of cloud base). The convergence point is the sign change of the buoyancy-pressure
 force nearest the root centre where it turns from pointing toward the shadow to pointing toward the sun; the reach on
@@ -68,4 +68,3 @@ if __name__ == "__main__":
     d = table(a.expt)
     print("--- low-level (%.2f-%.2f z_b) buoyancy-pressure force: convergence point and inward reach in units of L; peak and edge values in 1e-3 m s-2 (positive = toward the root)" % LOW)
     print(d.to_string(index=False, float_format=lambda v: f"{v:.2f}"))
-    print(fg.figure22(a.expt))

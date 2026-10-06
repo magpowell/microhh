@@ -128,39 +128,6 @@ def figure17(expt):
     return st.savefig(fig, expt, "fig17_births")
 
 
-def figure22(expt):
-    """Low-level horizontal buoyancy-pressure and dynamic-pressure forces along the sun-parallel slice, pooled over each
-    hour, over the surface shortwave along the slice relative to the domain mean."""
-    import catchment as ca
-    fig, axs = plt.subplots(3, len(HOURS), figsize=(2.1 * len(HOURS) + 0.6, 6.6), sharex=True, sharey="row", layout="constrained")
-    h = []
-    for j, t in enumerate(HOURS):
-        for rt, lab in RTS:
-            xl, pb, pd_, L, n = ca.low_level(expt, rt, *t)
-            e = ens_hour(expt, rt, *t).sel(dir="parallel")
-            sw = (e["sw"] / e["sw_domain"] - 1.) * 100.
-            for i, y in enumerate((1.e3 * pb, 1.e3 * pd_, sw)):
-                l, = axs[i, j].plot(xl, y, lw=1.6, label=lab, **st.RT[lab])
-            if j == 0:
-                h.append(l)
-        for i in range(3):
-            ax = axs[i, j]
-            st.zero_line(ax)
-            for x in (-0.5, 0.5):
-                ax.axvline(x, color="0.4", lw=0.6, ls="--")
-            ax.set_xlim(-1, 1)
-            ax.tick_params(labelsize=8)
-            st.apply(ax)
-            st.panel(ax, i * len(HOURS) + j, f"{t[0]:.0f}-{t[1]:.0f} LT" if i == 0 else "")
-        axs[2, j].set_xlabel(r"$r_\parallel / L$ [-]")
-    axs[0, 0].set_ylabel("buoyancy-pressure force,\n%.2f-%.1f $z_b$ [10$^{-3}$ m s$^{-2}$]" % ca.LOW)
-    axs[1, 0].set_ylabel("dynamic-pressure force,\n%.2f-%.1f $z_b$ [10$^{-3}$ m s$^{-2}$]" % ca.LOW)
-    axs[2, 0].set_ylabel("surface SW,\nfrom domain mean [%]")
-    axs[2, 0].set_ylim(-80., 30.)
-    fig.legend(handles=h, ncols=2, loc="outside lower center")
-    return st.savefig(fig, expt, "fig22_catchment")
-
-
 def figure6_strip(expt, vlim=4.e-3, hourly=False):
     """Buoyancy anomaly and circulation in the sun-parallel slice, 1D, 3D and their difference, per snapshot or pooled
     over each hour of the 60 s fields; bottom row: surface shortwave along the slice relative to the domain mean."""
@@ -223,5 +190,5 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v3")
     a = ap.parse_args()
-    for fn in (lambda e: figure6_strip(e, hourly=True), lambda e: figure7(e, hourly=True), figure17, figure22):
+    for fn in (lambda e: figure6_strip(e, hourly=True), lambda e: figure7(e, hourly=True), figure17):
         print(fn(a.expt))
