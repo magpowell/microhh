@@ -853,6 +853,15 @@ Done or queued:
 - Open-ground series every 5 min (`open_ground.py --every 5`, `--series`: barrier and low-level divergence over lit
   open ground against the lit-ground birth rate; figure 21).
 
-Next, in this order: the catchment map from the horizontal buoyancy-pressure force of the hourly composites (item 5);
-following individual large clouds through their lives with the 3D fields (item 6), after the hourly figure 7 is read.
+- Catchment from the hourly composites (`catchment.py`, `catchment.csv`, figure 22): low-level (0.05-0.3 z_b)
+  buoyancy-pressure and dynamic-pressure forces along the sun-parallel slice. 1D pulls symmetrically toward r = 0,
+  0.36 to 0.18e-3 m s-2 through the afternoon; 3D converges sunward of the centre (r = -0.16 to -0.29), pulls 0.55
+  to 0.61e-3 from the shadow side without decay and three times harder than 1D at the sunward slice edge; while the
+  shadow is inside the slice (12-14 LT) the 3D force turns outward at its centre (r = 0.8), the outflow from shaded
+  open ground. The reach is capped by the +-1 L slice. Hourly figure 7: the net upward push on the root (3D minus 1D)
+  is +0.02/+0.38/+0.80/+1.13e-3 m s-2 at 12-13 to 15-16 LT in the lowest 0.3 z_b and about zero above; the buoyancy
+  pressure removes two thirds of the raw buoyancy contrast; the dynamic-pressure force matters only below 0.3 z_b.
+
+Next: following individual large clouds through their lives with the 3D fields (item 6), after the hourly figure 7
+is read.
 Not planned: snapshot mean state at 5-min cadence; more frames for the per-cloud relations.
