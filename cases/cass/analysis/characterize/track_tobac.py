@@ -44,13 +44,13 @@ def load_qlp(rd, solar=None):
     return q, t, lst, dxy, dt
 
 
-def detect_track(q, dxy, dt, d_max=D_MAX, ms_distance=MS_DISTANCE):
+def detect_track(q, dxy, dt, d_max=D_MAX, ms_distance=MS_DISTANCE, n_min=N_MIN, memory=0):
     ny, nx = q.shape[1], q.shape[2]
     pbc = dict(PBC_flag="both", min_h1=0, max_h1=ny, min_h2=0, max_h2=nx)
     feats = tobac.feature_detection_multithreshold(q, dxy=dxy, threshold=[THRESHOLD], target="maximum", position_threshold="center",
-                                                   sigma_threshold=0., n_min_threshold=N_MIN, PBC_flag="both")
+                                                   sigma_threshold=0., n_min_threshold=n_min, PBC_flag="both")
     mask, feats = tobac.segmentation_2D(feats, q, dxy=dxy, threshold=THRESHOLD, PBC_flag="both")
-    tracks = tobac.linking_trackpy(feats, q, dt=dt, dxy=dxy, d_max=d_max, stubs=1, time_cell_min=0., **pbc)
+    tracks = tobac.linking_trackpy(feats, q, dt=dt, dxy=dxy, d_max=d_max, stubs=1, time_cell_min=0., memory=memory, **pbc)
     ms = tobac.merge_split.merge_split_MEST(tracks, dxy, distance=ms_distance, **pbc)
     return tracks, ms
 
@@ -76,10 +76,10 @@ def merge_split_flags(c, ms):
     return c
 
 
-def analyse(expt, rt, rep, solar, d_max, ms_distance):
+def analyse(expt, rt, rep, solar, d_max, ms_distance, n_min=N_MIN, memory=0, tag=""):
     rd = run_dir(expt, rt, rep)
     q, t, lst, dxy, dt = load_qlp(rd, solar)
-    tracks, ms = detect_track(q, dxy, dt, d_max, ms_distance)
+    tracks, ms = detect_track(q, dxy, dt, d_max, ms_distance, n_min, memory)
     tracks["area"] = tracks["num"].astype(float) * dxy * dxy
     tracks["t_sec"] = t[tracks.frame.values.astype(int)]
     tracks["lst"] = lst[tracks.frame.values.astype(int)]
@@ -89,8 +89,8 @@ def analyse(expt, rt, rep, solar, d_max, ms_distance):
     out = out_path(expt, rt, rep, 0).parent
     out.mkdir(parents=True, exist_ok=True)
     keep = [k for k in ("frame", "t_sec", "lst", "feature", "cell", "hdim_1", "hdim_2", "num", "ncells", "area") if k in tr]
-    tr[keep].to_csv(out / "tobac_features.csv", index=False)
-    c.to_csv(out / "tobac_cells.csv", index=False)
+    tr[keep].to_csv(out / f"tobac_features{tag}.csv", index=False)
+    c.to_csv(out / f"tobac_cells{tag}.csv", index=False)
     return tr, c
 
 
@@ -102,8 +102,11 @@ if __name__ == "__main__":
     ap.add_argument("--solar", type=float, nargs=2, default=None, help="solar-hour window, default the whole run")
     ap.add_argument("--d-max", type=float, default=D_MAX)
     ap.add_argument("--ms-distance", type=float, default=MS_DISTANCE)
+    ap.add_argument("--n-min", type=int, default=N_MIN, help="cells a feature needs at detection")
+    ap.add_argument("--memory", type=int, default=0, help="frames a cell may be missing and still be linked")
+    ap.add_argument("--tag", default="")
     a = ap.parse_args()
-    tr, c = analyse(a.expt, a.rt, a.rep, a.solar, a.d_max, a.ms_distance)
+    tr, c = analyse(a.expt, a.rt, a.rep, a.solar, a.d_max, a.ms_distance, a.n_min, a.memory, a.tag)
     per_frame = tr.groupby("frame").size()
     u = c[~c.in_multi_cell_track]
     print(f"{a.rt} rep_{a.rep:02d}: features per frame median {int(per_frame.median())}, cells {len(c)}, unlinked {int((c.cell < 0).sum())}, "
