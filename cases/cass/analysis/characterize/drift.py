@@ -226,6 +226,31 @@ def analyse(run_dir, tmin=None, tmax=None, thr=0., wind=False, conv=None, dmin=D
     return st, per_track(st), project(pat, run)
 
 
+def hourly(expt, dmins=(250., 500., 1000.), hours=(12, 16)):
+    """Cloud drift along and across the sun per solar hour from the tracker's features (no re-tracking), member mean
+    and min-max over members; per-step and per-track (clouds followed MIN_STEPS or more) means; drift_hourly.csv."""
+    from snapshot import out_path, run_dir
+    rows = []
+    for rt, lab in (("2stream", "1D"), ("raytracer", "3D")):
+        for rep in range(1, 5):
+            run = Run(run_dir(expt, rt, rep))
+            with xr.open_dataset(out_path(expt, rt, rep, 0).with_name("features.nc")) as ds:
+                feats = ds.to_dataframe()
+            for dmin in dmins:
+                st = project(steps(feats, run.xsize, run.ysize, dmin), run)
+                st["hour"] = np.floor(run.lst(st["time"].values))
+                per = per_track(st)
+                for h, g in st[(st["hour"] >= hours[0]) & (st["hour"] < hours[1])].groupby("hour"):
+                    p = per[per["hour"] == h]
+                    rows.append(dict(rt=lab, rep=rep, dmin=dmin, hour=int(h), n_steps=len(g), along=g["along"].mean(), across=g["across"].mean(),
+                                     n_tracks=len(p), along_track=p["along"].mean(), across_track=p["across"].mean()))
+    d = pd.DataFrame(rows)
+    g = d.groupby(["dmin", "hour", "rt"]).agg(n_steps=("n_steps", "sum"), along=("along", "mean"), along_min=("along", "min"), along_max=("along", "max"),
+                                              across=("across", "mean"), n_tracks=("n_tracks", "sum"), along_track=("along_track", "mean"), across_track=("across_track", "mean"))
+    g.to_csv(out_path(expt, "2stream", 1, 0).parents[2] / "drift_hourly.csv")
+    return g
+
+
 def mean_se(x):
     x = np.asarray(x, dtype=float)
     x = x[np.isfinite(x)]
@@ -253,11 +278,17 @@ def report(run_dir, tmin, tmax, wind, conv):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run", required=True, type=Path)
+    ap.add_argument("--run", type=Path)
+    ap.add_argument("--hourly", metavar="EXPT", help="cloud drift per solar hour from the tracker's features of all members")
     ap.add_argument("--tmin", type=float, default=None)
     ap.add_argument("--tmax", type=float, default=None)
     ap.add_argument("--wind", action="store_true", help="subtract the mean wind of the cloud layer")
     ap.add_argument("--conv", choices=["cross", "hf"], default=None,
                     help="root from the convergence at 100 m: cross-sections of u and v, or the one-minute 3D files")
     a = ap.parse_args()
-    report(a.run, a.tmin, a.tmax, a.wind, a.conv)
+    if a.hourly:
+        pd.set_option("display.width", 250)
+        print("cloud drift [m s-1] between consecutive minutes without merge or split, positive toward the sun; member mean (min, max); across = control")
+        print(hourly(a.hourly).to_string(float_format=lambda v: f"{v:.3f}"))
+    else:
+        report(a.run, a.tmin, a.tmax, a.wind, a.conv)
