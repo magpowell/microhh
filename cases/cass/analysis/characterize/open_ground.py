@@ -18,7 +18,8 @@ import xarray as xr
 import masks as mk
 import thermo as th
 from les_io import Run
-from snapshot import out_path, run_dir, snapshot_times
+from composite import cloud_base_index
+from snapshot import load as load_fields, out_path, run_dir, snapshot_times
 from suppression import far_from_cloud, cloud_mask
 from widening import surface_sw
 
@@ -69,27 +70,21 @@ def lifted_parcel(thl_p, qt_p, p, exn, kb, ktop=None):
 
 def analyse(expt, rt, rep, t):
     run = Run(run_dir(expt, rt, rep))
-    rd = run_dir(expt, rt, rep)
-    src = out_path(expt, rt, rep, t)
-    with xr.open_dataset(src) as s:
-        kb = int(s["kb"].values[IZB])
-        attrs = {a: s.attrs[a] for a in ("expt", "rt", "rep", "t_sec", "lst_solar")}
-    bs = run.basestate(t)
+    rd = run.dir
+    kb = cloud_base_index(expt, rt, rep, t)
+    f, bs = load_fields(run, t)
     z, zh, dx, dy = run.z, run.zh, run.dx, run.dy
-    f = {v: np.asarray(run.field(v, t), dtype=np.float32) for v in ("u", "v", "w", "thl", "qt", "ql", "qi")}
-    qc = f["ql"] + f["qi"]
+    qc = f["qc"]
     with xr.open_dataset(rd / "qlqi_path.xy.nc", decode_times=False) as ds:
         fr = int(np.argmin(np.abs(ds["time"].values.astype(float) - t)))
     sw = [surface_sw(rd, rt, g) for g in range(fr - LOOK, fr)]
     anomaly = np.mean([a - a.mean() for a in sw], axis=0)
     cl = classes(qc, dx, dy, anomaly)
     zb = z[kb]
-    # flow
     div = layer_mean(mass_divergence(f["u"], f["v"], bs["rhoref"], dx, dy), z, 0., DIV_TOP)
-    wf = mk.w_to_full(f["w"])
+    wf = f["w"]
     w05 = wf[int(np.argmin(np.abs(z - 0.5 * zb)))]
     w09 = wf[int(np.argmin(np.abs(z - 0.9 * zb)))]
-    # state
     thl_m, qt_m = f["thl"].mean(axis=(1, 2)), f["qt"].mean(axis=(1, 2))
     thl_a, qt_a = f["thl"] - thl_m[:, None, None], f["qt"] - qt_m[:, None, None]
     thl_sfc, qt_sfc = layer_mean(thl_a, z, 0., SFC_TOP), layer_mean(qt_a, z, 0., SFC_TOP)
@@ -100,7 +95,6 @@ def analyse(expt, rt, rep, t):
     thv_p = th.theta_v(thl_p, qt_p, ql_kb, 0., bs["exnref"][kb])
     thv_env = th.theta_v(f["thl"][kb], f["qt"][kb], f["ql"][kb], f["qi"][kb], bs["exnref"][kb])
     b_kb = thv_p - thv_env
-    # parcel buoyancy where it first condenses, against the column at that level (dry parcel there)
     kl = np.maximum(lcl, 0)
     jj, ii = np.indices(kl.shape)
     thv_env_lcl = th.theta_v(f["thl"][kl, jj, ii], f["qt"][kl, jj, ii], f["ql"][kl, jj, ii], f["qi"][kl, jj, ii], bs["exnref"][kl])
@@ -118,8 +112,11 @@ def analyse(expt, rt, rep, t):
                          anomaly=float(anomaly[m].mean())))
     d = pd.DataFrame(rows)
     ds = xr.Dataset.from_dataframe(d.set_index("cls"))
-    ds.attrs.update(attrs, kb=kb, zb=float(zb), far=FAR, lit=LIT, div_top=DIV_TOP, sfc_top=SFC_TOP, upper_lo=UPPER[0], upper_hi=UPPER[1])
-    ds.to_netcdf(src.with_name(f"open_ground_{int(t):07d}.nc"))
+    ds.attrs.update(expt=expt, rt=rt, rep=rep, t_sec=int(t), lst_solar=float(run.lst(t)), kb=kb, zb=float(zb), far=FAR, lit=LIT, div_top=DIV_TOP,
+                    sfc_top=SFC_TOP, upper_lo=UPPER[0], upper_hi=UPPER[1])
+    out = out_path(expt, rt, rep, t)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    ds.to_netcdf(out.with_name(f"open_ground_{int(t):07d}.nc"))
     return ds
 
 
@@ -135,6 +132,64 @@ def load(expt):
         d["t"], d["rt"], d["rep"] = t, rt, rep
         rows.append(d)
     return pd.concat(rows, ignore_index=True)
+
+
+def load_series(expt):
+    """Every open_ground file of the experiment (snapshot times and every-N-minute frames alike)."""
+    rows = []
+    for rt, rep in itertools.product(RTS, range(1, 5)):
+        for f in sorted(out_path(expt, rt, rep, 0).parent.glob("open_ground_*.nc")):
+            with xr.open_dataset(f) as ds:
+                d = ds.to_dataframe().reset_index()
+                d["t"], d["lst"], d["zb"] = int(ds.attrs["t_sec"]), float(ds.attrs["lst_solar"]), float(ds.attrs["zb"])
+            d["rt"], d["rep"] = rt, rep
+            rows.append(d)
+    return pd.concat(rows, ignore_index=True)
+
+
+def series(expt):
+    """Hourly means over lit open ground of the barrier and the low-level divergence, next to the lit-ground birth rate."""
+    d = load_series(expt)
+    res = out_path(expt, "2stream", 1, 0).parents[2]
+    lit = d[d.cls == "open_lit"].copy()
+    lit["hour"] = np.floor(lit.lst)
+    cols = ["frac", "div_h", "w05", "b_lcl", "b_kb", "b_kb_pos", "lcl_minus_zb", "qt_up", "thl_up"]
+    g = lit.groupby(["hour", "rt"])[cols].mean().unstack("rt")
+    out = pd.DataFrame({f"{c}_{lab}": g[c][rt] for c in cols for rt, lab in zip(RTS, ("1D", "3D"))})
+    try:
+        s = pd.read_csv(res / "suppression_decomp_far500_min40000.csv").set_index("hour")
+        out["births_lit_1D"], out["births_lit_3D"] = s["rate_lit_1D"], s["rate_lit_3D"]
+    except FileNotFoundError:
+        pass
+    out.to_csv(res / "open_ground_series.csv")
+    return d, out
+
+
+def figure21(expt):
+    import style as st
+    from style import plt
+    d = load_series(expt)
+    lit = d[d.cls == "open_lit"]
+    panels = (("b_lcl", r"parcel $\theta_v$ deficit at its LCL [K]"), ("div_h", r"mass divergence below 200 m [kg m$^{-3}$ s$^{-1}$]"),
+              ("w05", r"w at 0.5 $z_b$ [m s$^{-1}$]"), ("qt_up", r"$q_t$ anomaly, upper subcloud [g kg$^{-1}$]"))
+    fig, axs = plt.subplots(2, 2, figsize=(8.4, 5.8), sharex=True, layout="constrained")
+    h = []
+    for k, ((v, lab), ax) in enumerate(zip(panels, axs.ravel())):
+        for rt, name in zip(RTS, ("1D", "3D")):
+            c = lit[lit.rt == rt].pivot_table(index="t", columns="rep", values=v)
+            x = lit[lit.rt == rt].groupby("t").lst.first().reindex(c.index).values
+            ax.fill_between(x, c.min(axis=1), c.max(axis=1), alpha=0.25, lw=0, **st.RT[name])
+            l, = ax.plot(x, c.mean(axis=1), lw=1.6, label=name, **st.RT[name])
+            if k == 0:
+                h.append(l)
+        ax.set_ylabel(lab)
+        st.zero_line(ax)
+        st.apply(ax)
+        st.panel(ax, k)
+        if k >= 2:
+            ax.set_xlabel("local solar time [h]")
+    fig.legend(handles=h, ncols=2, loc="outside lower center")
+    return st.savefig(fig, expt, "fig21_open_ground_series")
 
 
 def summary(expt):
@@ -161,8 +216,21 @@ if __name__ == "__main__":
     ap.add_argument("--rep", type=int)
     ap.add_argument("--t", type=int, nargs="+", default=None, help="default: the snapshot times of the run")
     ap.add_argument("--summary", action="store_true")
+    ap.add_argument("--series", action="store_true", help="hourly means over lit open ground from every file, and figure 21")
+    ap.add_argument("--every", type=float, default=None, help="instead of --t: every N minutes of the 60 s fields within --solar")
+    ap.add_argument("--solar", type=float, nargs=2, default=(11.9, 16.1))
     a = ap.parse_args()
+    if a.every and a.rt:
+        run = Run(run_dir(a.expt, a.rt, a.rep))
+        ts = np.array(run.hf_times())
+        step = int(round(a.every * 60. / (ts[1] - ts[0])))
+        a.t = [int(t) for t in ts[::step] if a.solar[0] <= run.lst(t) < a.solar[1]]
     a.t = a.t or (list(snapshot_times(a.expt, a.rt, a.rep, skip_first=True)) if a.rt else None)
+    if a.series:
+        d, o = series(a.expt)
+        print(o.to_string(float_format=lambda v: f"{v:.3g}"))
+        print(figure21(a.expt))
+        raise SystemExit
     pd.set_option("display.width", 250); pd.set_option("display.max_columns", 80); pd.set_option("display.max_rows", 200)
     fmt = lambda v: f"{v:.3g}"
     if a.summary:
