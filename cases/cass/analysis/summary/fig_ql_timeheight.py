@@ -1,4 +1,4 @@
-"""Figure: time-height liquid water profile (slab mean), member mean, for 3D, 1D and 3D minus 1D in percent of 1D."""
+"""Figure: time-height liquid water profile (slab mean), member mean, for 3D, 1D and 3D minus 1D."""
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -14,13 +14,12 @@ PCT, PCT_DIFF = 99, 95  # percentiles setting the colour scales
 s1, s3 = data.stats_ensemble("1D"), data.stats_ensemble("3D")
 cf1 = 1e3 * s1["ql"].sel(z=slice(*ZLIM)).mean("member")
 cf3 = 1e3 * s3["ql"].sel(z=slice(*ZLIM)).mean("member")
-MASK = 0.05  # no percentage where the 1D liquid water is below this fraction of the colour-scale maximum
+diff = cf3 - cf1
 x, z = cf1["lst"].values, cf1["z"].values
 shown = (x >= data.XLIM[0]) & (x <= data.XLIM[1])
 pos = np.concatenate([v[shown].values[v[shown].values > 0] for v in (cf1, cf3)])
 vmax = float(np.percentile(pos, PCT)) if pos.size else 1e-3
-diff = (100. * (cf3 - cf1) / cf1).where(cf1 > MASK * vmax)
-dmax = float(np.nanpercentile(np.abs(diff[shown].values), PCT_DIFF)) or 1.
+dmax = float(np.percentile(np.abs(diff[shown].values), PCT_DIFF)) or 1e-3
 
 fig, axes = plt.subplots(3, 1, figsize=FIGSIZE, sharex=True, sharey=True, layout="constrained")
 pcms = []
@@ -37,7 +36,7 @@ for k, ax in enumerate(axes):
 axes[0].set_ylim(*ZLIM)
 style.hour_axis(axes[2], data.XLIM)
 fig.colorbar(pcms[0], ax=axes[:2].tolist(), location="right", shrink=0.85, aspect=25, label="liquid water [g kg$^{-1}$]")
-fig.colorbar(pcms[2], ax=axes[2], location="right", shrink=0.85, aspect=25, label="3D minus 1D liquid water [%]")
+fig.colorbar(pcms[2], ax=axes[2], location="right", shrink=0.85, aspect=25, label="3D minus 1D liquid water [g kg$^{-1}$]")
 style.savefig(fig, OUT)
 
 for label, prof in (("1D", data.window_mean(cf1)), ("3D", data.window_mean(cf3))):
