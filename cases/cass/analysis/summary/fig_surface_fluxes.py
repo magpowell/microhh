@@ -28,10 +28,13 @@ for i, run in enumerate(ROWS):
         style.panel(ax, 2 * j + i)
         style.despine(ax)
     style.row_label(axes[i, 0], run)
-for j in range(3):
-    lims = [ax.get_ylim() for ax in axes[:, j]]
-    axes[0, j].set_ylim(min(lo for lo, _ in lims), max(hi for _, hi in lims))
-    axes[1, j].set_ylim(axes[0, j].get_ylim())
+for j, (cvar, svar, _) in enumerate(COLUMNS):
+    # limits from the member means inside the shown hours, shared by the two rows
+    shown = [d.where((d["lst"] >= data.XLIM[0]) & (d["lst"] <= data.XLIM[1])).mean("member")
+             for run in ROWS for d in (s[run][svar], c[run][f"{cvar}_cloud"], c[run][f"{cvar}_clear"])]
+    lo, hi = min(float(d.min()) for d in shown), max(float(d.max()) for d in shown)
+    for ax in axes[:, j]:
+        ax.set_ylim(lo - 0.05 * (hi - lo), hi + 0.05 * (hi - lo))
     style.hour_axis(axes[1, j], data.XLIM)
 fig.legend(handles=style.condition_handles(), loc="outside center right")
 style.savefig(fig, OUT)

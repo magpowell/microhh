@@ -1,19 +1,19 @@
-"""Figure: time-height cloud fraction profile, member mean, for 3D, 1D and 3D minus 1D."""
+"""Figure: time-height liquid water profile (slab mean), member mean, for 3D, 1D and 3D minus 1D."""
 import numpy as np
 import matplotlib.pyplot as plt
 
 import data
 import style
 
-OUT = data.OUT_ROOT / "fig_cloud_fraction_timeheight.png"
+OUT = data.OUT_ROOT / "fig_ql_timeheight.png"
 FIGSIZE = (10., 9.)
 ZLIM = (500., 5000.)
 CMAP, CMAP_DIFF = "Blues", "RdBu_r"
 PCT, PCT_DIFF = 99, 95  # percentiles setting the colour scales
 
 s1, s3 = data.stats_ensemble("1D"), data.stats_ensemble("3D")
-cf1 = s1["ql_frac"].sel(z=slice(*ZLIM)).mean("member")
-cf3 = s3["ql_frac"].sel(z=slice(*ZLIM)).mean("member")
+cf1 = 1e3 * s1["ql"].sel(z=slice(*ZLIM)).mean("member")
+cf3 = 1e3 * s3["ql"].sel(z=slice(*ZLIM)).mean("member")
 diff = cf3 - cf1
 x, z = cf1["lst"].values, cf1["z"].values
 shown = (x >= data.XLIM[0]) & (x <= data.XLIM[1])
@@ -35,11 +35,9 @@ for k, ax in enumerate(axes):
     ax.tick_params(labelsize=8)
 axes[0].set_ylim(*ZLIM)
 style.hour_axis(axes[2], data.XLIM)
-fig.colorbar(pcms[0], ax=axes[:2].tolist(), location="right", shrink=0.85, aspect=25, label="cloud fraction [-]")
-fig.colorbar(pcms[2], ax=axes[2], location="right", shrink=0.85, aspect=25, label="3D minus 1D cloud fraction [-]")
+fig.colorbar(pcms[0], ax=axes[:2].tolist(), location="right", shrink=0.85, aspect=25, label="liquid water [g kg$^{-1}$]")
+fig.colorbar(pcms[2], ax=axes[2], location="right", shrink=0.85, aspect=25, label="3D minus 1D liquid water [g kg$^{-1}$]")
 style.savefig(fig, OUT)
 
-data.report("layer-mean cloud fraction 0.5-5 km", s1["ql_frac"].sel(z=slice(*ZLIM)).mean("z"),
-            s3["ql_frac"].sel(z=slice(*ZLIM)).mean("z"), "-")
 for label, prof in (("1D", data.window_mean(cf1)), ("3D", data.window_mean(cf3))):
-    print(f"window-mean profile peak {label}: {float(prof.max()):.3f} at z = {int(np.rint(float(z[prof.argmax()])))} m")
+    print(f"window-mean liquid water profile peak {label}: {float(prof.max()):.4f} g/kg at z = {int(np.rint(float(z[prof.argmax()])))} m")
