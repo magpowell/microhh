@@ -181,27 +181,25 @@ def figure4h(expt, xmax=7.):
     return st.savefig(fig, expt, "fig4_w_pdf_hourly")
 
 
-def figure4r(expt, xmax=7., step=0.28, sigma=1.5):
-    """The same distributions as a ridgeline: one row per hour on a shared axis, filled, lightly smoothed (Gaussian,
-    sigma bins), member mean."""
+def figure4r(expt, xmax=7., step=0.28):
+    """The same distributions as a ridgeline: one row per hour on a shared axis, kernel density estimate (scipy
+    gaussian_kde, Scott's rule) of the core speeds of all members, from the 0.1 m/s counts."""
     import style as st
-    from scipy.ndimage import gaussian_filter1d
+    from scipy.stats import gaussian_kde
     from style import plt
     H = load_hist(expt)
     x = 0.5 * (W_BINS[:-1] + W_BINS[1:])
+    xs = np.linspace(0., xmax, 400)
     fig, ax = plt.subplots(figsize=(4.6, 4.6), layout="constrained")
     h, ticks = [], []
     for k, (h0, h1) in enumerate(HOURS):
         base = (len(HOURS) - 1 - k) * step
         for rt, lab in zip(RTS, ("1D", "3D")):
-            pm = []
-            for rep in range(1, 5):
-                d = H[(rt, rep)]
-                c = d["hist_core"].values[((d.lst >= h0) & (d.lst < h1)).values].sum(axis=0)
-                pm.append(c / max(c.sum(), 1) / np.diff(W_BINS))
-            y = gaussian_filter1d(np.mean(pm, axis=0), sigma, mode="nearest")
-            ax.fill_between(x, base, base + y, alpha=0.35, lw=0, zorder=2 * k, **st.RT[lab])
-            line, = ax.plot(x, base + y, lw=1.4, zorder=2 * k + 1, label=lab, **st.RT[lab])
+            c = sum(H[(rt, rep)]["hist_core"].values[((H[(rt, rep)].lst >= h0) & (H[(rt, rep)].lst < h1)).values].sum(axis=0)
+                    for rep in range(1, 5))
+            y = gaussian_kde(x[c > 0], weights=c[c > 0], bw_method=c.sum() ** -0.2)(xs)   # Scott's rule on the sample count
+            ax.fill_between(xs, base, base + y, alpha=0.35, lw=0, zorder=2 * k, **st.RT[lab])
+            line, = ax.plot(xs, base + y, lw=1.4, zorder=2 * k + 1, label=lab, **st.RT[lab])
             if k == 0:
                 h.append(line)
         ax.axhline(base, color="0.6", lw=0.6, zorder=2 * k)
