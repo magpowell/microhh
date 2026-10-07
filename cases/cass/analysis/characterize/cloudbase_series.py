@@ -152,35 +152,6 @@ def load_hist(expt):
     return out
 
 
-def figure4h(expt, xmax=7.):
-    """Core updraft speed distributions at cloud base pooled over each hour of the 60 s fields; member min-max."""
-    import style as st
-    from style import plt
-    H = load_hist(expt)
-    edges = W_BINS
-    x = 0.5 * (edges[:-1] + edges[1:])
-    fig, axs = plt.subplots(1, len(HOURS), figsize=(3. * len(HOURS), 3.2), sharey=True, layout="constrained")
-    for k, ((h0, h1), ax) in enumerate(zip(HOURS, axs)):
-        h = []
-        for rt, lab in zip(RTS, ("1D", "3D")):
-            pm = []
-            for rep in range(1, 5):
-                d = H[(rt, rep)]
-                c = d["hist_core"].values[((d.lst >= h0) & (d.lst < h1)).values].sum(axis=0)
-                pm.append(c / max(c.sum(), 1) / np.diff(edges))
-            pm = np.array(pm)
-            ax.fill_between(x, pm.min(axis=0), pm.max(axis=0), alpha=0.25, lw=0, **st.RT[lab])
-            h.append(ax.plot(x, pm.mean(axis=0), lw=1.8, label=lab, **st.RT[lab])[0])
-        ax.set_xlim(0., xmax)
-        st.apply(ax)
-        st.panel(ax, k, f"{h0:.0f}-{h1:.0f} LT")
-    axs[0].set_ylabel(r"probability density [s m$^{-1}$]")
-    axs[0].set_ylim(bottom=0.)
-    fig.supxlabel(r"core vertical velocity at cloud base [m s$^{-1}$]", fontsize=9)
-    fig.legend(handles=h, ncols=2, loc="outside lower center")
-    return st.savefig(fig, expt, "fig4_w_pdf_hourly")
-
-
 def figure4r(expt, xmax=7., step=0.28):
     """The same distributions as a ridgeline: one row per hour on a shared axis, kernel density estimate (scipy
     gaussian_kde, Scott's rule) of the core speeds of all members, from the 0.1 m/s counts."""
@@ -229,6 +200,6 @@ if __name__ == "__main__":
         show = ["hour"] + [f"{v}_{k}" for v in ("zb", "w_core", "a_core", "M_core", "thv_root_50", "cin_entraining") for k in ("1D", "3D", "ratio")]
         print("--- hourly means, 1D, 3D and 3D over 1D")
         print(h[show].to_string(index=False, float_format=lambda v: f"{v:.3g}"))
-        print(figure4h(a.expt))
+        print(figure4r(a.expt))
     else:
         analyse(a.expt, a.rt, a.rep, a.every, a.solar)
