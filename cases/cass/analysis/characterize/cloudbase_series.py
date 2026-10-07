@@ -171,13 +171,45 @@ def figure4h(expt, xmax=7.):
             pm = np.array(pm)
             ax.fill_between(x, pm.min(axis=0), pm.max(axis=0), alpha=0.25, lw=0, **st.RT[lab])
             h.append(ax.plot(x, pm.mean(axis=0), lw=1.8, label=lab, **st.RT[lab])[0])
-        ax.set(xlim=(0., xmax), xlabel=r"core vertical velocity at cloud base [m s$^{-1}$]")
+        ax.set_xlim(0., xmax)
         st.apply(ax)
         st.panel(ax, k, f"{h0:.0f}-{h1:.0f} LT")
     axs[0].set_ylabel(r"probability density [s m$^{-1}$]")
     axs[0].set_ylim(bottom=0.)
+    fig.supxlabel(r"core vertical velocity at cloud base [m s$^{-1}$]", fontsize=9)
     fig.legend(handles=h, ncols=2, loc="outside lower center")
     return st.savefig(fig, expt, "fig4_w_pdf_hourly")
+
+
+def figure4r(expt, xmax=7., step=0.48):
+    """The same distributions as one stack: one row per hour on a shared axis, offset upward, later hours lower."""
+    import style as st
+    from style import plt
+    H = load_hist(expt)
+    x = 0.5 * (W_BINS[:-1] + W_BINS[1:])
+    fig, ax = plt.subplots(figsize=(4.6, 6.), layout="constrained")
+    h = []
+    for k, (h0, h1) in enumerate(HOURS):
+        base = (len(HOURS) - 1 - k) * step
+        for rt, lab in zip(RTS, ("1D", "3D")):
+            pm = []
+            for rep in range(1, 5):
+                d = H[(rt, rep)]
+                c = d["hist_core"].values[((d.lst >= h0) & (d.lst < h1)).values].sum(axis=0)
+                pm.append(c / max(c.sum(), 1) / np.diff(W_BINS))
+            pm = np.array(pm)
+            ax.fill_between(x, base + pm.min(axis=0), base + pm.max(axis=0), alpha=0.25, lw=0, **st.RT[lab])
+            line, = ax.plot(x, base + pm.mean(axis=0), lw=1.6, label=lab, **st.RT[lab])
+            if k == 0:
+                h.append(line)
+        ax.axhline(base, color="0.75", lw=0.8, zorder=0)
+        ax.text(xmax, base + 0.02, f"{h0:.0f}-{h1:.0f} LT", ha="right", va="bottom", fontsize=9)
+    ax.set(xlim=(0., xmax), xlabel=r"core vertical velocity at cloud base [m s$^{-1}$]", ylabel=r"probability density [s m$^{-1}$]")
+    ax.set_yticks([0., 0.2, 0.4])
+    ax.set_ylim(0., (len(HOURS) - 1) * step + 0.5)
+    st.apply(ax)
+    ax.legend(handles=h, ncols=2, loc="upper right")
+    return st.savefig(fig, expt, "fig4_w_pdf_ridge")
 
 
 if __name__ == "__main__":
