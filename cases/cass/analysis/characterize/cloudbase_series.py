@@ -181,14 +181,16 @@ def figure4h(expt, xmax=7.):
     return st.savefig(fig, expt, "fig4_w_pdf_hourly")
 
 
-def figure4r(expt, xmax=7., step=0.48):
-    """The same distributions as one stack: one row per hour on a shared axis, offset upward, later hours lower."""
+def figure4r(expt, xmax=7., step=0.28, sigma=1.5):
+    """The same distributions as a ridgeline: one row per hour on a shared axis, filled, lightly smoothed (Gaussian,
+    sigma bins), member mean."""
     import style as st
+    from scipy.ndimage import gaussian_filter1d
     from style import plt
     H = load_hist(expt)
     x = 0.5 * (W_BINS[:-1] + W_BINS[1:])
-    fig, ax = plt.subplots(figsize=(4.6, 6.), layout="constrained")
-    h = []
+    fig, ax = plt.subplots(figsize=(4.6, 4.6), layout="constrained")
+    h, ticks = [], []
     for k, (h0, h1) in enumerate(HOURS):
         base = (len(HOURS) - 1 - k) * step
         for rt, lab in zip(RTS, ("1D", "3D")):
@@ -197,17 +199,19 @@ def figure4r(expt, xmax=7., step=0.48):
                 d = H[(rt, rep)]
                 c = d["hist_core"].values[((d.lst >= h0) & (d.lst < h1)).values].sum(axis=0)
                 pm.append(c / max(c.sum(), 1) / np.diff(W_BINS))
-            pm = np.array(pm)
-            ax.fill_between(x, base + pm.min(axis=0), base + pm.max(axis=0), alpha=0.25, lw=0, **st.RT[lab])
-            line, = ax.plot(x, base + pm.mean(axis=0), lw=1.6, label=lab, **st.RT[lab])
+            y = gaussian_filter1d(np.mean(pm, axis=0), sigma, mode="nearest")
+            ax.fill_between(x, base, base + y, alpha=0.35, lw=0, zorder=2 * k, **st.RT[lab])
+            line, = ax.plot(x, base + y, lw=1.4, zorder=2 * k + 1, label=lab, **st.RT[lab])
             if k == 0:
                 h.append(line)
-        ax.axhline(base, color="0.75", lw=0.8, zorder=0)
-        ax.text(xmax, base + 0.02, f"{h0:.0f}-{h1:.0f} LT", ha="right", va="bottom", fontsize=9)
-    ax.set(xlim=(0., xmax), xlabel=r"core vertical velocity at cloud base [m s$^{-1}$]", ylabel=r"probability density [s m$^{-1}$]")
-    ax.set_yticks([0., 0.2, 0.4])
-    ax.set_ylim(0., (len(HOURS) - 1) * step + 0.5)
+        ax.axhline(base, color="0.6", lw=0.6, zorder=2 * k)
+        ticks.append((base, f"{h0:.0f}-{h1:.0f} LT"))
+    ax.set(xlim=(0., xmax), xlabel=r"core vertical velocity at cloud base [m s$^{-1}$]")
+    ax.set_yticks([t for t, _ in ticks], [l for _, l in ticks])
+    ax.tick_params(axis="y", length=0)
+    ax.set_ylim(0., (len(HOURS) - 1) * step + 0.42)
     st.apply(ax)
+    ax.spines["left"].set_visible(False)
     ax.legend(handles=h, ncols=2, loc="upper right")
     return st.savefig(fig, expt, "fig4_w_pdf_ridge")
 
