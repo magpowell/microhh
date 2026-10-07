@@ -56,7 +56,7 @@ def table(expt):
                              pb_sun_edge=1.e3 * pb[0], pb_shadow_edge=-1.e3 * pb[-1],
                              pd_sun_max=1.e3 * pd_[sun].max(), pd_shadow_max=-1.e3 * pd_[sha].min()))
     d = pd.DataFrame(rows)
-    d.to_csv(fg.st.outdir(expt).parent / "catchment.csv", index=False)
+    d.to_csv(fg.out_path(expt, "2stream", 1, 0).parents[2] / "catchment.csv", index=False)
     return d
 
 

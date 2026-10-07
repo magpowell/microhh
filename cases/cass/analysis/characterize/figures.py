@@ -99,23 +99,24 @@ def figure7(expt, vlim=3.e-3, hourly=False):
                 ax.set_xlabel(r"$r_\parallel / L$ [-]")
     cb = fig.colorbar(im, ax=axs, shrink=0.6, pad=0.01)
     cb.set_label(r"vertical acceleration, 3D minus 1D [m s$^{-2}$]")
-    return st.savefig(fig, expt, "fig7_forces_3D_minus_1D" + ("_hourly" if hourly else ""))
+    return st.savefig(fig, expt, "in_progress/fig_forces" + ("" if hourly else "_snapshots"))
 
 
-def figure6_strip(expt, vlim=4.e-3, hourly=False):
+def figure6_strip(expt, vlim=4.e-3, hourly=False, direction="parallel"):
     """Buoyancy anomaly and circulation in the sun-parallel slice, 1D, 3D and their difference, per snapshot or pooled
     over each hour of the 60 s fields; bottom row: surface shortwave along the slice relative to the domain mean."""
     times = list(HOURS) if hourly else snapshot_times(expt)
     rows = ("1D", "3D", "3D - 1D")
-    fig = plt.figure(figsize=(2.1 * len(times) + 0.6, 7.6), layout="constrained")
-    gs = fig.add_gridspec(4, len(times) + 1, height_ratios=(1, 1, 1, 0.5), width_ratios=[1] * len(times) + [0.05])
+    fig = plt.figure(figsize=(2.1 * len(times) + 0.6, 7.4), layout="constrained")
+    gs = fig.add_gridspec(4, len(times) + 1, height_ratios=(1, 1, 1, 0.3), width_ratios=[1] * len(times) + [0.05])
     k = 0
+    SCALE, KEY = {"1D": 24., "3D": 24., "3D - 1D": 8.}, {"1D": 2., "3D - 1D": 0.5}     # the difference row has its own arrow scale
     for j, t in enumerate(times):
         if hourly:
-            c = {lab: ens_hour(expt, rt, *t).sel(dir="parallel") for rt, lab in RTS}
+            c = {lab: ens_hour(expt, rt, *t).sel(dir=direction) for rt, lab in RTS}
             label = f"{t[0]:.0f}-{t[1]:.0f} LT"
         else:
-            c = {lab: ens(expt, rt, t)[0].sel(dir="parallel") for rt, lab in RTS}
+            c = {lab: ens(expt, rt, t)[0].sel(dir=direction) for rt, lab in RTS}
             label = st.lt(ens(expt, "2stream", t)[1][0].attrs["lst_solar"])
         c["3D - 1D"] = c["3D"] - c["1D"]
         for i, lab in enumerate(rows):
@@ -123,7 +124,9 @@ def figure6_strip(expt, vlim=4.e-3, hourly=False):
             d = c[lab]
             im = ax.pcolormesh(d["xl"], d["znd"], d["b"], cmap=CMAP_ANOM, vmin=-vlim, vmax=vlim, rasterized=True)
             q = d.isel(xl=slice(4, None, 12), znd=slice(4, None, 8))
-            ax.quiver(q["xl"], q["znd"], q["us"], q["w"], scale=24., width=0.005, color="0.15")
+            qv = ax.quiver(q["xl"], q["znd"], q["us"], q["w"], scale=SCALE[lab], width=0.005, color="0.15")
+            if j == len(times) - 1 and lab in KEY:
+                ax.quiverkey(qv, 0.93, 1.07, KEY[lab], f"{KEY[lab]:g} m s$^{{-1}}$", labelpos="W", labelsep=0.05, coordinates="axes", fontproperties=dict(size=7))
             for x in (-0.5, 0.5):
                 ax.axvline(x, color="0.4", lw=0.6, ls="--")
             ax.set(xlim=(-1, 1), ylim=(0, 1))
@@ -131,33 +134,35 @@ def figure6_strip(expt, vlim=4.e-3, hourly=False):
             if j == 0:
                 ax.set_ylabel(r"$z / z_b$ [-]")
                 row_label(ax, lab)
-            st.panel(ax, i * len(times) + j, label if i == 0 else "")
+            st.panel(ax, i * len(times) + j)
+            if i == 0:
+                ax.annotate(label, xy=(0.5, 1.), xycoords="axes fraction", xytext=(0, 20), textcoords="offset points", ha="center", va="bottom", fontsize=11)
         ax = fig.add_subplot(gs[3, j])
         h = []
         for rt, lab in RTS:
             if hourly:
-                e = ens_hour(expt, rt, *t).sel(dir="parallel")
+                e = ens_hour(expt, rt, *t).sel(dir=direction)
                 pct = (e["sw"] / e["sw_domain"] - 1.) * 100.
                 l, = ax.plot(e["xl"], pct, lw=1.6, label=lab, **st.RT[lab])
             else:
                 e, m = ens(expt, rt, t)
-                pct = np.array([(d["sw"].sel(dir="parallel") / float(d["sw_domain"]) - 1.) * 100. for d in m])
+                pct = np.array([(d["sw"].sel(dir=direction) / float(d["sw_domain"]) - 1.) * 100. for d in m])
                 ax.fill_between(e["xl"], pct.min(axis=0), pct.max(axis=0), alpha=0.25, lw=0, **st.RT[lab])
                 l, = ax.plot(e["xl"], pct.mean(axis=0), lw=1.6, label=lab, **st.RT[lab])
             h.append(l)
         st.zero_line(ax)
         for x in (-0.5, 0.5):
             ax.axvline(x, color="0.4", lw=0.6, ls="--")
-        ax.set(xlim=(-1, 1), ylim=(-75, 30), xlabel=r"$r_\parallel / L$ [-]")
+        ax.set(xlim=(-1, 1), ylim=(-90, 30), yticks=(-80, -40, 0), xlabel=(r"$r_\parallel / L$ [-]" if direction == "parallel" else r"$r_\perp / L$ [-]"))
         ax.tick_params(labelleft=(j == 0), labelsize=8)
         if j == 0:
             ax.set_ylabel("surface SW,\nfrom domain\nmean [%]")
         st.apply(ax)
         st.panel(ax, 3 * len(times) + j)
-    cb = fig.colorbar(im, cax=fig.add_subplot(gs[:3, len(times)]))
+    cb = fig.colorbar(im, cax=fig.add_subplot(gs[:3, len(times)]), extend="both")
     cb.set_label(r"buoyancy anomaly [m s$^{-2}$]")
     fig.legend(handles=h, ncols=2, loc="outside lower center")
-    return st.savefig(fig, expt, "fig6_circulation_strip" + ("_hourly" if hourly else ""))
+    return st.savefig(fig, expt, "fig_circulation" + ("" if hourly else "_snapshots") + ("" if direction == "parallel" else "_perp"))
 
 
 if __name__ == "__main__":

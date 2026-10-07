@@ -8,7 +8,7 @@ from matplotlib.lines import Line2D  # noqa: E402
 COLOR = {"1D": "C0", "3D": "C1", "3D minus 1D": "0.25"}
 CONDITION = {"domain mean": dict(color="k", ls="--", alpha=0.12),
              "under cloud": dict(color="tab:red", ls="-", alpha=0.20),
-             "clear": dict(color="0.7", ls="-", alpha=0.20)}
+             "clear sky": dict(color="0.7", ls="-", alpha=0.20)}
 SPREAD = "minmax"  # band over members: "minmax" or "std"
 BAND_ALPHA = 0.25
 LW = 1.2

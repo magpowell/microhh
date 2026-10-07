@@ -20,7 +20,7 @@ from snapshot import out_path, run_dir
 from style import plt
 
 THR = 0.5
-WINDOW = (12., 16.)
+WINDOW = (13., 15.)      # solar hours of the start of the systems shown
 KINDS = ("passive", "single pulse", "multipulse")
 KIND_COLORS = ("0.7", "C2", "C3")
 
@@ -81,12 +81,12 @@ def figure_map(expt, rep=None, solar=14.5, vmax=200.):
     cb = fig.colorbar(im, ax=axs, orientation="horizontal", shrink=0.5, pad=0.02, extend="max")
     cb.set_label("pulses in the cloud system over its life [-]")
     print("plotted rep", rep)
-    return st.savefig(fig, expt, "fig_systems_map")
+    return st.savefig(fig, expt, "in_progress/fig_systems_map")
 
 
 def figure_violins(expt):
-    """Multipulse system lifetime and pulses per multipulse system, all members pooled: seaborn violins, axis cut at
-    the 98th percentile."""
+    """Multipulse system lifetime and pulses per multipulse system for systems that start in WINDOW, all members
+    pooled: seaborn violins, axis cut at the 98th percentile."""
     import seaborn as sns
     M = members(expt)
     rows = (("life", "multipulse system lifetime [min]"), ("n_pulses", "pulses per multipulse system [-]"))
@@ -97,13 +97,18 @@ def figure_violins(expt):
     d = pd.concat(d)
     fig, axs = plt.subplots(1, 2, figsize=(6.4, 3.6), layout="constrained")
     for k, ((v, name), ax) in enumerate(zip(rows, axs)):
-        sns.violinplot(data=d, x="rt", y=v, hue="rt", palette={l: st.RT[l]["color"] for l in ("1D", "3D")}, cut=0, legend=False, saturation=1., ax=ax)
+        sns.violinplot(data=d, x="rt", y=v, hue="rt", palette={l: st.RT[l]["color"] for l in ("1D", "3D")}, cut=0, legend=False, saturation=1., inner=None, ax=ax)
         for body in ax.collections:
             body.set(alpha=0.5, edgecolor="none")
+        ax.boxplot([d[d.rt == l][v].values for l in ("1D", "3D")], positions=[0, 1], widths=0.07, showfliers=False, showcaps=False,
+                   patch_artist=True, boxprops=dict(facecolor="0.25", edgecolor="0.25", lw=0.8), whiskerprops=dict(color="0.25", lw=1., solid_capstyle="butt"),
+                   medianprops=dict(color="w", lw=1.4, solid_capstyle="butt"), manage_ticks=False, zorder=3)
         ax.set(xlabel="", ylabel=name, ylim=(0., d[v].quantile(0.98)))
         st.apply(ax)
         st.panel(ax, k)
-    return st.savefig(fig, expt, "fig_systems_violins")
+    print(d.groupby("rt").agg(n=("life", "size"), life_median=("life", "median"), life_mean=("life", "mean"), life_p75=("life", lambda x: x.quantile(.75)), life_p90=("life", lambda x: x.quantile(.9)),
+                              pulses_median=("n_pulses", "median"), pulses_mean=("n_pulses", "mean"), pulses_p75=("n_pulses", lambda x: x.quantile(.75)), pulses_p90=("n_pulses", lambda x: x.quantile(.9))).to_string(float_format=lambda x: f"{x:.1f}"))
+    return st.savefig(fig, expt, "in_progress/fig_systems_violins")
 
 
 if __name__ == "__main__":

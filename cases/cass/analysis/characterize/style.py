@@ -36,13 +36,15 @@ def lt(hours):
 
 
 def outdir(expt):
-    d = Path(os.environ["SCRATCH"]) / "CASS_LES" / "analysis" / "characterize" / expt / "figures"
+    """All figures of an experiment, from characterize/ and summary/ alike; in_progress/ holds the ones not settled."""
+    d = Path(os.environ["SCRATCH"]) / "CASS_LES" / "analysis" / "figures" / expt
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def savefig(fig, expt, name):
     f = outdir(expt) / f"{name}.png"
+    f.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(f, dpi=300, bbox_inches="tight")
     if WRITE_PDF:
         fig.savefig(f.with_suffix(".pdf"), bbox_inches="tight")

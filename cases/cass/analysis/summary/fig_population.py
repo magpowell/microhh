@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import data
 import style
 
-OUT = data.OUT_ROOT / "fig_population.png"
+OUT = data.FIG_ROOT / "fig_population.png"
 FIGSIZE = (12.5, 3.9)
 SMOOTH = 10  # minutes
 

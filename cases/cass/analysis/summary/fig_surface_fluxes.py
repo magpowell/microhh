@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import data
 import style
 
-OUT = data.OUT_ROOT / "fig_surface_fluxes.png"
+OUT = data.FIG_ROOT / "fig_surface_fluxes.png"
 FIGSIZE = (18., 7.)
 LW = 1.6
 COLUMNS = (("sw", "sw_sfc", "surface shortwave received [W m$^{-2}$]"),
@@ -21,7 +21,7 @@ for i, run in enumerate(ROWS):
     for j, (cvar, svar, ylabel) in enumerate(COLUMNS):
         ax = axes[i, j]
         for name, series in (("domain mean", s[run][svar]), ("under cloud", c[run][f"{cvar}_cloud"]),
-                             ("clear", c[run][f"{cvar}_clear"])):
+                             ("clear sky", c[run][f"{cvar}_clear"])):
             st = style.CONDITION[name]
             style.ensemble_line(ax, series["lst"].values, series, st["color"], st["ls"], LW, st["alpha"])
         ax.set_ylabel(ylabel)

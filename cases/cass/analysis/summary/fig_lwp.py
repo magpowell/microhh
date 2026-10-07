@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import data
 import style
 
-OUT = data.OUT_ROOT / "fig_lwp.png"
+OUT = data.FIG_ROOT / "fig_lwp.png"
 FIGSIZE = (5., 4.)
 
 s1, s3 = data.stats_ensemble("1D"), data.stats_ensemble("3D")

@@ -13,6 +13,7 @@ EXPT_ROOT = Path("/pscratch/sd/m/mpowell/CASS_LES/experiments") / EXPT
 FEATURES_ROOT = Path("/pscratch/sd/m/mpowell/CASS_LES/analysis/characterize") / EXPT
 OUT_ROOT = Path("/pscratch/sd/m/mpowell/CASS_LES/analysis/summary") / EXPT
 CACHE_DIR = OUT_ROOT / "cache"
+FIG_ROOT = Path("/pscratch/sd/m/mpowell/CASS_LES/analysis/figures") / EXPT  # shared with characterize/
 
 RT = {"1D": "2stream", "3D": "raytracer"}
 REPS = (1, 2, 3, 4)

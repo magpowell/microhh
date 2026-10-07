@@ -182,7 +182,7 @@ def figure4r(expt, xmax=7., step=0.28):
     st.apply(ax)
     ax.spines["left"].set_visible(False)
     ax.legend(handles=h, ncols=2, loc="upper right")
-    return st.savefig(fig, expt, "fig4_w_pdf_ridge")
+    return st.savefig(fig, expt, "fig_w_ridge")
 
 
 if __name__ == "__main__":

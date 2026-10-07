@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import data
 import style
 
-OUT = data.OUT_ROOT / "fig_ql_timeheight.png"
+OUT = data.FIG_ROOT / "fig_ql_timeheight.png"
 FIGSIZE = (10., 9.)
 ZLIM = (500., 5000.)
 CMAP, CMAP_DIFF = "Blues", "RdBu_r"
@@ -36,8 +36,8 @@ for k, ax in enumerate(axes):
     ax.tick_params(labelsize=8)
 axes[0].set_ylim(*ZLIM)
 style.hour_axis(axes[2], data.XLIM)
-fig.colorbar(pcms[0], ax=axes[:2].tolist(), location="right", shrink=0.85, aspect=25, label="liquid water [g kg$^{-1}$]")
-fig.colorbar(pcms[2], ax=axes[2], location="right", shrink=0.85, aspect=25, label="3D minus 1D liquid water [g kg$^{-1}$]")
+fig.colorbar(pcms[0], ax=axes[:2].tolist(), location="right", shrink=0.85, aspect=25, extend="max", label="liquid water [g kg$^{-1}$]")
+fig.colorbar(pcms[2], ax=axes[2], location="right", shrink=0.85, aspect=25, extend="both", label="3D minus 1D liquid water [g kg$^{-1}$]")
 style.savefig(fig, OUT)
 
 for label, prof in (("1D", data.window_mean(cf1)), ("3D", data.window_mean(cf3))):
