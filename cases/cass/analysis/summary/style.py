@@ -62,7 +62,7 @@ def condition_handles(names=CONDITION):
 
 
 def row_label(ax, text):
-    ax.annotate(text, xy=(0., 0.5), xycoords="axes fraction", xytext=(-48, 0), textcoords="offset points",
+    ax.annotate(text, xy=(0., 0.5), xycoords="axes fraction", xytext=(-62, 0), textcoords="offset points",
                 fontsize=11, fontweight="bold", ha="center", va="center")
 
 
