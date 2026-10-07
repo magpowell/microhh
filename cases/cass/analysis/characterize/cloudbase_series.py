@@ -193,21 +193,21 @@ def figure4r(expt, xmax=7., step=0.28):
     fig, ax = plt.subplots(figsize=(4.6, 4.6), layout="constrained")
     h, ticks = [], []
     for k, (h0, h1) in enumerate(HOURS):
-        base = (len(HOURS) - 1 - k) * step
+        base, front = k * step, 2 * (len(HOURS) - k)      # earliest hour at the bottom, in front
         for rt, lab in zip(RTS, ("1D", "3D")):
             c = sum(H[(rt, rep)]["hist_core"].values[((H[(rt, rep)].lst >= h0) & (H[(rt, rep)].lst < h1)).values].sum(axis=0)
                     for rep in range(1, 5))
             y = gaussian_kde(x[c > 0], weights=c[c > 0], bw_method=c.sum() ** -0.2)(xs)   # Scott's rule on the sample count
-            ax.fill_between(xs, base, base + y, alpha=0.35, lw=0, zorder=2 * k, **st.RT[lab])
-            line, = ax.plot(xs, base + y, lw=1.4, zorder=2 * k + 1, label=lab, **st.RT[lab])
+            ax.fill_between(xs, base, base + y, color="w", lw=0, zorder=front)     # hides the row behind
+            line, = ax.plot(xs, base + y, lw=1.6, zorder=front + 1, label=lab, **st.RT[lab])
             if k == 0:
                 h.append(line)
-        ax.axhline(base, color="0.6", lw=0.6, zorder=2 * k)
+        ax.axhline(base, color="0.6", lw=0.6, zorder=front)
         ticks.append((base, f"{h0:.0f}-{h1:.0f} LT"))
     ax.set(xlim=(0., xmax), xlabel=r"core vertical velocity at cloud base [m s$^{-1}$]")
     ax.set_yticks([t for t, _ in ticks], [l for _, l in ticks])
     ax.tick_params(axis="y", length=0)
-    ax.set_ylim(0., (len(HOURS) - 1) * step + 0.42)
+    ax.set_ylim(0., (len(HOURS) - 1) * step + 0.5)
     st.apply(ax)
     ax.spines["left"].set_visible(False)
     ax.legend(handles=h, ncols=2, loc="upper right")
