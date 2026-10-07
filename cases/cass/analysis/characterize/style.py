@@ -36,7 +36,7 @@ def lt(hours):
 
 
 def outdir(expt):
-    """All figures of an experiment, from characterize/ and summary/ alike; in_progress/ holds the ones not settled."""
+    """All figures of an experiment; in_progress/ holds the ones not settled."""
     d = Path(os.environ["SCRATCH"]) / "CASS_LES" / "analysis" / "figures" / expt
     d.mkdir(parents=True, exist_ok=True)
     return d

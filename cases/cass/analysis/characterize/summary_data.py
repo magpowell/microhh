@@ -1,12 +1,10 @@
 """Loaders for the CASS LES v3 summary figures: 1D (two-stream) vs 3D (ray tracer) radiation."""
-import sys
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
 
-sys.path.append("/global/homes/m/mpowell/repos/microhh/cases/cass/analysis/characterize")
-from les_io import Run, lowest  # noqa: E402
+from les_io import Run, lowest
 
 EXPT = "no_aerosols_zero_wind_v3"
 EXPT_ROOT = Path("/pscratch/sd/m/mpowell/CASS_LES/experiments") / EXPT

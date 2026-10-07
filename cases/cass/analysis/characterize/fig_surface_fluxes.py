@@ -2,8 +2,8 @@
 the statistics, cloudy and clear column means from the cached cross-sections."""
 import matplotlib.pyplot as plt
 
-import data
-import style
+import summary_data as data
+import summary_style as style
 
 OUT = data.FIG_ROOT / "fig_surface_fluxes.png"
 FIGSIZE = (18., 7.)

@@ -2,8 +2,8 @@
 running means)."""
 import matplotlib.pyplot as plt
 
-import data
-import style
+import summary_data as data
+import summary_style as style
 
 OUT = data.FIG_ROOT / "fig_population.png"
 FIGSIZE = (12.5, 3.9)

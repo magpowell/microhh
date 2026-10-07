@@ -9,7 +9,7 @@ from multiprocessing import Pool
 import numpy as np
 import xarray as xr
 
-import data
+import summary_data as data
 
 BATCH = 20  # frames per read
 KEYS = [f"{v}_{part}" for v in ("sw", "H", "LE") for part in ("mean", "cloud", "clear")] + ["cloud_frac"]

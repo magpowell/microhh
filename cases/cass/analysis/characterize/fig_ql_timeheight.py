@@ -2,8 +2,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-import data
-import style
+import summary_data as data
+import summary_style as style
 
 OUT = data.FIG_ROOT / "fig_ql_timeheight.png"
 FIGSIZE = (10., 9.)

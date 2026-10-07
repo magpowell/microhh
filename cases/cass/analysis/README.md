@@ -6,10 +6,9 @@
 |---|---|
 | `cass_analysis.py`, `catalog.py`, `test_shared_fixes.py` | shared library and experiment registry; the notebooks import them from this directory |
 | `base_comparison.ipynb`, `rs_scale_comparison.ipynb`, `wind_geo_comparison.ipynb` | notebooks (v2 era; run from this directory) |
-| `characterize/` | the v3 analysis pipeline (snapshots, population, composites, figures) |
-| `summary/` | summary figures of the v3 runs (time series, time-height) |
+| `characterize/` | the v3 analysis pipeline (snapshots, population, composites) and all its figures, including the `fig_*.py` time series |
 
-Figures from `characterize/` and `summary/` go to one folder, `$SCRATCH/CASS_LES/analysis/figures/<expt>/`, with unsettled ones in
+All figures go to one folder, `$SCRATCH/CASS_LES/analysis/figures/<expt>/`, with unsettled ones in
 `in_progress/`. File names carry no figure numbers.
 | `seb/` | conditioned surface-energy-balance cache (`compute_seb_cache.py`, `submit_seb_cache.sh`) |
 | `sweeps/` | `_gen_sweep_notebooks.py`, generates sweep notebooks into this directory |

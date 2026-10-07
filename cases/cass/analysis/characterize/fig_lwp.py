@@ -1,8 +1,8 @@
 """Figure: domain-mean liquid water path, 1D vs 3D."""
 import matplotlib.pyplot as plt
 
-import data
-import style
+import summary_data as data
+import summary_style as style
 
 OUT = data.FIG_ROOT / "fig_lwp.png"
 FIGSIZE = (5., 4.)
