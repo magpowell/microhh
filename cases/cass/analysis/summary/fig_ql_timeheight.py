@@ -28,7 +28,8 @@ for ax, field, label, cmap, lim in ((axes[0], cf3, "3D", CMAP, (0., vmax)),
                                     (axes[2], diff, "3D minus 1D", CMAP_DIFF, (-dmax, dmax))):
     pcms.append(ax.pcolormesh(x, z, field.values.T, cmap=cmap, vmin=lim[0], vmax=lim[1],
                               shading="nearest", rasterized=True))
-    ax.set_title(label, fontsize=10)
+    if ax is not axes[2]:
+        ax.set_title(label, fontsize=10)
     ax.set_ylabel("z [m]")
 for k, ax in enumerate(axes):
     style.panel(ax, k)
