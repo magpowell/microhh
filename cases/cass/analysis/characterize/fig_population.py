@@ -3,9 +3,8 @@ running means)."""
 import matplotlib.pyplot as plt
 
 import summary_data as data
-import summary_style as style
+import style
 
-OUT = data.FIG_ROOT / "fig_population.png"
 FIGSIZE = (12.5, 3.9)
 SMOOTH = 10  # minutes
 
@@ -18,15 +17,15 @@ PANELS = ((s1["ql_cover"], s3["ql_cover"], "cloud cover [-]"),
 
 fig, axes = plt.subplots(1, 3, figsize=FIGSIZE, layout="constrained")
 for k, (ax, (a1, a3, ylabel)) in enumerate(zip(axes, PANELS)):
-    style.ensemble_line(ax, a1["lst"].values, a1, style.COLOR["1D"], label="1D")
-    style.ensemble_line(ax, a3["lst"].values, a3, style.COLOR["3D"], label="3D")
+    style.ensemble_line(ax, a1["lst"].values, a1, style.RT["1D"]["color"], label="1D")
+    style.ensemble_line(ax, a3["lst"].values, a3, style.RT["3D"]["color"], label="3D")
     ax.set_ylabel(ylabel)
     style.panel(ax, k)
-    style.despine(ax)
+    style.apply(ax)
     style.hour_axis(ax, data.XLIM)
 axes[0].set_ylim(bottom=0.)
 axes[0].legend(loc="upper right")
-style.savefig(fig, OUT)
+print("wrote", style.savefig(fig, data.EXPT, "fig_population"))
 
 data.report("cloud cover", s1["ql_cover"], s3["ql_cover"], "-")
 data.report("mean effective diameter", p1["diameter"], p3["diameter"], "m")

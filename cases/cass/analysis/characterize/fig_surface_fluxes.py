@@ -3,9 +3,8 @@ the statistics, cloudy and clear column means from the cached cross-sections."""
 import matplotlib.pyplot as plt
 
 import summary_data as data
-import summary_style as style
+import style
 
-OUT = data.FIG_ROOT / "fig_surface_fluxes.png"
 FIGSIZE = (18., 7.)
 LW = 1.6
 COLUMNS = (("sw", "sw_sfc", "surface shortwave received [W m$^{-2}$]"),
@@ -26,8 +25,8 @@ for i, run in enumerate(ROWS):
             style.ensemble_line(ax, series["lst"].values, series, st["color"], st["ls"], LW, st["alpha"])
         ax.set_ylabel(ylabel)
         style.panel(ax, 2 * j + i)
-        style.despine(ax)
-    style.row_label(axes[i, 0], run)
+        style.apply(ax)
+    style.row_label(axes[i, 0], run, offset=-62, rotation=0)
 for j, (cvar, svar, _) in enumerate(COLUMNS):
     # limits from the member means inside the shown hours, shared by the two rows
     shown = [d.where((d["lst"] >= data.XLIM[0]) & (d["lst"] <= data.XLIM[1])).mean("member")
@@ -37,7 +36,7 @@ for j, (cvar, svar, _) in enumerate(COLUMNS):
         ax.set_ylim(lo - 0.05 * (hi - lo), hi + 0.05 * (hi - lo))
     style.hour_axis(axes[1, j], data.XLIM)
 fig.legend(handles=style.condition_handles(), loc="outside center right")
-style.savefig(fig, OUT)
+print("wrote", style.savefig(fig, data.EXPT, "fig_surface_fluxes"))
 
 for cvar, svar, _ in COLUMNS:
     data.report(f"{cvar} domain mean", s["1D"][svar], s["3D"][svar], "W m-2")

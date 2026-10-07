@@ -3,9 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import summary_data as data
-import summary_style as style
+import style
 
-OUT = data.FIG_ROOT / "fig_ql_timeheight.png"
 FIGSIZE = (10., 9.)
 ZLIM = (500., 5000.)
 CMAP, CMAP_DIFF = "Blues", "RdBu_r"
@@ -38,7 +37,7 @@ axes[0].set_ylim(*ZLIM)
 style.hour_axis(axes[2], data.XLIM)
 fig.colorbar(pcms[0], ax=axes[:2].tolist(), location="right", shrink=0.85, aspect=25, extend="max", label="liquid water [g kg$^{-1}$]")
 fig.colorbar(pcms[2], ax=axes[2], location="right", shrink=0.85, aspect=25, extend="both", label="3D minus 1D liquid water [g kg$^{-1}$]")
-style.savefig(fig, OUT)
+print("wrote", style.savefig(fig, data.EXPT, "fig_ql_timeheight"))
 
 for label, prof in (("1D", data.window_mean(cf1)), ("3D", data.window_mean(cf3))):
     print(f"window-mean liquid water profile peak {label}: {float(prof.max()):.4f} g/kg at z = {int(np.rint(float(z[prof.argmax()])))} m")

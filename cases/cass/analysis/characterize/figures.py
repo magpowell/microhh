@@ -66,11 +66,6 @@ def ens_hour(expt, rt, h0, h1):
 HOURS = ((12., 13.), (13., 14.), (14., 15.), (15., 16.))
 
 
-def row_label(ax, text):
-    ax.annotate(text, xy=(0, 0.5), xycoords="axes fraction", xytext=(-52, 0), textcoords="offset points",
-                ha="center", va="center", rotation=90, fontweight="bold", fontsize=10)
-
-
 def figure7(expt, vlim=3.e-3, hourly=False):
     """Forces on the air in the sun-parallel slice, 3D minus 1D, per snapshot or pooled over each hour of the 60 s fields."""
     rows = (("b", "buoyancy"), ("beff", "effective\nbuoyancy"), ("a_pd", "dynamic\npressure force"), ("tot", "sum"))
@@ -94,7 +89,7 @@ def figure7(expt, vlim=3.e-3, hourly=False):
             st.panel(ax, i * len(times) + j, label if i == 0 else "")
             if j == 0:
                 ax.set_ylabel(r"$z / z_b$ [-]")
-                row_label(ax, lab)
+                st.row_label(ax, lab)
             if i == len(rows) - 1:
                 ax.set_xlabel(r"$r_\parallel / L$ [-]")
     cb = fig.colorbar(im, ax=axs, shrink=0.6, pad=0.01)
@@ -133,7 +128,7 @@ def figure6_strip(expt, vlim=4.e-3, hourly=False, direction="parallel"):
             ax.tick_params(labelbottom=False, labelleft=(j == 0), labelsize=8)
             if j == 0:
                 ax.set_ylabel(r"$z / z_b$ [-]")
-                row_label(ax, lab)
+                st.row_label(ax, lab)
             st.panel(ax, i * len(times) + j)
             if i == 0:
                 ax.annotate(label, xy=(0.5, 1.), xycoords="axes fraction", xytext=(0, 20), textcoords="offset points", ha="center", va="bottom", fontsize=11)
