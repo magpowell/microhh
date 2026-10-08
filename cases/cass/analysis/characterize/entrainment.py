@@ -8,7 +8,8 @@ the slab, over a layer z1..z2:
 qt is the variable of record, thl the check; the decaying surface tracer gives a third estimate, eps plus its known sink
 C_c / (TAU w_c) (the sink term is as large as eps itself, so this one rests on the core-mean speed). Samples are the 300 s statistics of the model's qlcore mask (cloudy and buoyant; no ascent condition, unlike masks.core),
 averaged per solar hour. The cloud layer runs from the hourly cloud base (lowest level with a cloud fraction of A_MIN) to
-the top of the core; rates are given above its lowest quarter (LOWER), where air joins the core by condensing and not by
+the top of the core; rates are given from START above cloud base, about its lowest quarter (200 to 330 m here; one
+height for both runs so the profiles start together), below which air joins the core by condensing and not by
 mixing (organised inflow; Drueke et al. 2020; Dawe and Austin 2013), in layers with a mean core area of A_MIN. The terms the
 two formulas neglect are returned as rates in the same units: sources (microphysics, radiation) and time tendencies.
 These are bulk dilution and detrainment rates; directly measured exchange rates are about twice as large (Romps 2010).
@@ -27,7 +28,7 @@ from snapshot import out_path, run_dir
 RTS = ("2stream", "raytracer")
 HOURS = tuple((float(h), float(h + 1)) for h in range(11, 17))
 DZ_LAYER = 250.          # m
-LOWER = 0.25             # rates only above this fraction of the cloud layer: organised inflow below (Drueke et al. 2020)
+START = 300.             # m above cloud base, about the lowest quarter of the cloud layer: organised inflow below (Drueke et al. 2020)
 A_MIN = 1.e-3
 SOURCES = {"qt": ("qtt_micro",), "thl": ("thlt_micro", "thlt_rad")}
 TAU = 900.               # s, decay time of the surface tracer (couvreux)
@@ -92,10 +93,10 @@ def member_layers(expt, rt, rep, dz=DZ_LAYER):
             continue
         zb, ztop = p["zh"][np.argmax(p["cf"] >= A_MIN)], p["zh"][ok[-1] + 1]      # cloud base: cloud fraction of A_MIN
         zcore = p["zh"][ok[0]]
-        for z1 in np.arange(zb, ztop - dz + 1., dz):            # mass flux, area and speed from cloud base; rates above the lowest quarter
+        for z1 in np.arange(zb, ztop - dz + 1., dz):            # mass flux, area and speed from cloud base; rates from START
             z2 = z1 + dz
             k = (p["z"] > z1) & (p["z"] < z2)
-            above = z1 >= zb + LOWER * (ztop - zb)
+            above = z1 >= zb + START
             rates = above and p["a"][k].mean() >= A_MIN and p["a"][k].min() > 0.
             if p["a"][k].mean() <= 0. or (above and not rates):
                 continue
@@ -131,7 +132,7 @@ def summary(expt):
     return d, e
 
 
-YLIM = (0., 1300.)
+YLIM = (START, 1300.)
 SPLIT = {"area": ("a", dict(color="k", ls="-")), "speed": ("w_c", dict(color="0.5", ls="--"))}      # a ratio is neither run
 
 
@@ -196,6 +197,7 @@ def figure_massflux(expt, hours=(12, 13, 14, 15)):
     from matplotlib.lines import Line2D
     from style import plt
     d = layers(expt)
+    d = d[d.eps_qt.notna()]           # from START above cloud base, as the rates
     fig, axs = plt.subplots(2, len(hours), figsize=(10., 5.6), sharey=True, sharex="row", layout="constrained")
     for j, hour in enumerate(hours):
         _both(axs[0, j], d, hour, "M", st)
@@ -204,7 +206,6 @@ def figure_massflux(expt, hours=(12, 13, 14, 15)):
         ax.axvline(1., color="0.75", lw=0.8, zorder=0)
         for lab, (v, kw) in SPLIT.items():
             r = paired_ratio(d, hour, v)
-            r = r[r.index >= 250.]              # below, the two cores start at different heights and the ratio says only that
             ax.fill_betweenx(r.index, r.min(axis=1), r.max(axis=1), alpha=0.25, lw=0, color=kw["color"])
             ax.plot(r.mean(axis=1), r.index, lw=1.6, **kw)
         ax.set(xlabel="3D / 1D [-]", xlim=(0.75, 3.05), xticks=[1., 1.5, 2., 2.5, 3.])
