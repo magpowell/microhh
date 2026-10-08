@@ -6,9 +6,10 @@ the slab, over a layer z1..z2:
     eps   = -[phi_c(z2) - phi_c(z1)] / integral (phi_c - phi_e) dz
     delta = eps - ln(M(z2) / M(z1)) / (z2 - z1)
 qt is the variable of record, thl the check; the decaying surface tracer gives a third estimate, eps plus its known sink
-C_c / (TAU w_c) (the sink term is as large as eps itself, so this one rests on the core-mean speed). Samples are the 300 s statistics of the qlcore mask (cloudy and buoyant),
-averaged per solar hour; layers start LIFT above the hourly cloud base (lowest level with a cloud fraction of A_MIN)
-and need a mean core area of A_MIN. The terms the
+C_c / (TAU w_c) (the sink term is as large as eps itself, so this one rests on the core-mean speed). Samples are the 300 s statistics of the model's qlcore mask (cloudy and buoyant; no ascent condition, unlike masks.core),
+averaged per solar hour. The cloud layer runs from the hourly cloud base (lowest level with a cloud fraction of A_MIN) to
+the top of the core; rates are given above its lowest quarter (LOWER), where air joins the core by condensing and not by
+mixing (organised inflow; Drueke et al. 2020; Dawe and Austin 2013), in layers with a mean core area of A_MIN. The terms the
 two formulas neglect are returned as rates in the same units: sources (microphysics, radiation) and time tendencies.
 These are bulk dilution and detrainment rates; directly measured exchange rates are about twice as large (Romps 2010).
 """
@@ -26,7 +27,7 @@ from snapshot import out_path, run_dir
 RTS = ("2stream", "raytracer")
 HOURS = tuple((float(h), float(h + 1)) for h in range(11, 17))
 DZ_LAYER = 250.          # m
-LIFT = 250.              # m above cloud base; the core is still forming below
+LOWER = 0.25             # rates only above this fraction of the cloud layer: organised inflow below (Drueke et al. 2020)
 A_MIN = 1.e-3
 SOURCES = {"qt": ("qtt_micro",), "thl": ("thlt_micro", "thlt_rad")}
 TAU = 900.               # s, decay time of the surface tracer (couvreux)
@@ -91,13 +92,14 @@ def member_layers(expt, rt, rep, dz=DZ_LAYER):
             continue
         zb, ztop = p["zh"][np.argmax(p["cf"] >= A_MIN)], p["zh"][ok[-1] + 1]      # cloud base: cloud fraction of A_MIN
         zcore = p["zh"][ok[0]]
-        for z1 in np.arange(zb, ztop - dz + 1., dz):            # mass flux, area and speed from cloud base; rates from LIFT
+        for z1 in np.arange(zb, ztop - dz + 1., dz):            # mass flux, area and speed from cloud base; rates above the lowest quarter
             z2 = z1 + dz
             k = (p["z"] > z1) & (p["z"] < z2)
-            rates = z1 >= zb + LIFT and p["a"][k].mean() >= A_MIN and p["a"][k].min() > 0.
-            if p["a"][k].mean() <= 0. or (z1 >= zb + LIFT and not rates):
+            above = z1 >= zb + LOWER * (ztop - zb)
+            rates = above and p["a"][k].mean() >= A_MIN and p["a"][k].min() > 0.
+            if p["a"][k].mean() <= 0. or (above and not rates):
                 continue
-            row = dict(rt=rt, rep=rep, hour=int(h0), zb=zb, zcore=zcore, z=0.5 * (z1 + z2), height=0.5 * (z1 + z2) - zb, a=p["a"][k].mean(),
+            row = dict(rt=rt, rep=rep, hour=int(h0), zb=zb, zcore=zcore, ztop=ztop, z=0.5 * (z1 + z2), height=0.5 * (z1 + z2) - zb, a=p["a"][k].mean(),
                        M=float(np.interp(0.5 * (z1 + z2), p["zh"], p["M"])), dlnM=1.e3 * np.log(np.interp(z2, p["zh"], p["M"]) / np.interp(z1, p["zh"], p["M"])) / dz)
             if not rates:
                 row.update(w_c=float(np.interp(0.5 * (z1 + z2), p["zh"], p["w_c"])))
@@ -202,7 +204,7 @@ def figure_massflux(expt, hours=(12, 13, 14, 15)):
         ax.axvline(1., color="0.75", lw=0.8, zorder=0)
         for lab, (v, kw) in SPLIT.items():
             r = paired_ratio(d, hour, v)
-            r = r[r.index >= LIFT]              # below, the two cores start at different heights and the ratio says only that
+            r = r[r.index >= 250.]              # below, the two cores start at different heights and the ratio says only that
             ax.fill_betweenx(r.index, r.min(axis=1), r.max(axis=1), alpha=0.25, lw=0, color=kw["color"])
             ax.plot(r.mean(axis=1), r.index, lw=1.6, **kw)
         ax.set(xlabel="3D / 1D [-]", xlim=(0.75, 3.05), xticks=[1., 1.5, 2., 2.5, 3.])

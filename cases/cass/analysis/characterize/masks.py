@@ -16,8 +16,8 @@ def slab_mean(f):
 
 
 def core(ql, w, thv, ql_thr=0.):
-    """Cloudy and buoyant, as the model's qlcore mask (no condition on w)."""
-    return (ql > ql_thr) & (thv > slab_mean(thv))
+    """Cloudy, buoyant and rising (Siebesma et al. 2003, as in Drueke et al. 2020). The model's qlcore mask has no w condition."""
+    return (ql > ql_thr) & (w > 0.) & (thv > slab_mean(thv))
 
 
 def cloudy_updraft(ql, w, ql_thr=0.):

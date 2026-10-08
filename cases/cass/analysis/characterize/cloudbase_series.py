@@ -152,7 +152,7 @@ def load_hist(expt):
     return out
 
 
-def figure4r(expt, xmin=-1., xmax=7., step=0.28):
+def figure4r(expt, xmin=0., xmax=7., step=0.28):
     """The same distributions as a ridgeline: one row per hour on a shared axis, kernel density estimate (scipy
     gaussian_kde, Scott's rule) of the core speeds of all members, from the 0.1 m/s counts."""
     import style as st

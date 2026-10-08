@@ -62,9 +62,9 @@ if __name__ == "__main__":
             f(); print("ok", k)
 
 
-def test_core_keeps_sinking_buoyant_cloud():
+def test_core_needs_rising_buoyant_cloud():
     ql = np.zeros((1, 2, 2)); ql[0, 0, :] = 1.e-4
     thv = np.full((1, 2, 2), 300.); thv[0, 0, :] = 300.5
     w = np.array([[[1., -1.], [1., -1.]]])
-    assert mk.core(ql, w, thv)[0].tolist() == [[True, True], [False, False]]      # as the model's qlcore mask
+    assert mk.core(ql, w, thv)[0].tolist() == [[True, False], [False, False]]
     assert mk.cloudy_updraft(ql, w)[0].tolist() == [[True, False], [False, False]]
