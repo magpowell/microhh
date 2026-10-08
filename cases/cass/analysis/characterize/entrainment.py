@@ -1,0 +1,127 @@
+"""Bulk entrainment and detrainment of the cloud core from the model's conditional statistics (Siebesma and Cuijpers 1995).
+
+python entrainment.py --expt no_aerosols_zero_wind_v3        (entrainment_layers.csv, entrainment_hourly.csv)
+With a the core area fraction, M = rho a w_c the core mass flux, phi_c the core mean and phi_e the mean of the rest of
+the slab, over a layer z1..z2:
+    eps   = -[phi_c(z2) - phi_c(z1)] / integral (phi_c - phi_e) dz
+    delta = eps - ln(M(z2) / M(z1)) / (z2 - z1)
+qt is the variable of record, thl the check. Samples are the 300 s statistics of the qlcore mask (cloudy and buoyant),
+averaged per solar hour; layers start LIFT above the hourly core base and need a mean core area of A_MIN. The terms the
+two formulas neglect are returned as rates in the same units: sources (microphysics, radiation) and time tendencies.
+These are bulk dilution and detrainment rates; directly measured exchange rates are about twice as large (Romps 2010).
+"""
+import argparse
+import itertools
+
+import netCDF4
+import numpy as np
+import pandas as pd
+
+from les_io import Run
+from lifetime import ensemble
+from snapshot import out_path, run_dir
+
+RTS = ("2stream", "raytracer")
+HOURS = tuple((float(h), float(h + 1)) for h in range(11, 17))
+DZ_LAYER = 250.          # m
+LIFT = 200.              # m above the core base
+A_MIN = 1.e-3
+SOURCES = {"qt": ("qtt_micro",), "thl": ("thlt_micro", "thlt_rad")}
+
+
+def layer_rates(z, zh, a, M, phi_c, phi_e, z1, z2):
+    """eps and delta [1/m] over z1..z2. a, phi_c, phi_e on full levels z; M on half levels zh; edges on half levels."""
+    k = (z > z1) & (z < z2)
+    dz = np.diff(zh)[k]
+    f1, f2 = np.interp([z1, z2], z, phi_c)
+    eps = -(f2 - f1) / np.sum((phi_c[k] - phi_e[k]) * dz)
+    m1, m2 = np.interp([z1, z2], zh, M)
+    return eps, eps - np.log(m2 / m1) / (z2 - z1)
+
+
+def layer_residuals(z, zh, a, rho, w_c, phi_c, phi_e, S_c, dphi_dt, da_dt, z1, z2):
+    """The neglected terms as rates [1/m]: source and core tendency in eps, area tendency in delta (layer means)."""
+    k = (z > z1) & (z < z2)
+    dz = np.diff(zh)[k]
+    wk = np.interp(z[k], zh, w_c)
+    den = np.sum((phi_c[k] - phi_e[k]) * dz)
+    return (np.sum(S_c[k] / wk * dz) / den, -np.sum(dphi_dt[k] / wk * dz) / den,
+            -np.sum(da_dt[k] / (a[k] * wk) * dz) / (z2 - z1))
+
+
+def hour_profiles(rd, h0, h1):
+    """Sample-mean core and environment profiles of one member and solar hour, and the tendencies across the hour."""
+    run = Run(rd)
+    with netCDF4.Dataset(rd / "cass.qlcore.0000000.nc") as c, netCDF4.Dataset(rd / "cass.default.0000000.nc") as d:
+        lst = run.lst(c["time"][:])
+        t = np.flatnonzero((lst >= h0) & (lst < h1))
+        g = lambda f, grp, v: np.ma.filled(f[grp][v][t], 0.).astype(float)
+        z, zh = c["z"][:].astype(float), c["zh"][:].astype(float)
+        area, areah, w = g(c, "default", "area"), g(c, "default", "areah"), g(c, "default", "w")
+        rho, rhoh = g(d, "thermo", "rho"), g(d, "thermo", "rhoh")
+        a = area.mean(axis=0)
+        out = dict(z=z, zh=zh, a=a, rho=rho.mean(axis=0), M=(rhoh * areah * w).mean(axis=0), n=t.size,
+                   w_c=(areah * w).mean(axis=0) / np.maximum(areah.mean(axis=0), 1.e-12))
+        cm = lambda x: (area * x).mean(axis=0) / np.maximum(a, 1.e-12)                 # core mean, area weighted
+        half = t.size // 2
+        tend = lambda x: (x[half:].mean(axis=0) - x[:half].mean(axis=0)) / (0.5 * (c["time"][t[-1]] - c["time"][t[0]]) + 150.)
+        out["da_dt"] = tend(area)
+        for v in ("qt", "thl"):
+            pc, pm = g(c, "thermo", v), g(d, "thermo", v)
+            out[v + "_c"] = cm(pc)
+            out[v + "_e"] = (pm.mean(axis=0) - a * out[v + "_c"]) / (1. - a)
+            out[v + "_S"] = sum(cm(g(c, "tend", s)) for s in SOURCES[v])
+            first, last = [(area[s] * pc[s]).mean(axis=0) / np.maximum(area[s].mean(axis=0), 1.e-12) for s in (slice(None, half), slice(half, None))]
+            out[v + "_dt"] = (last - first) / (0.5 * (c["time"][t[-1]] - c["time"][t[0]]) + 150.)
+    return out
+
+
+def member_layers(expt, rt, rep):
+    rd = run_dir(expt, rt, rep)
+    rows = []
+    for h0, h1 in HOURS:
+        p = hour_profiles(rd, h0, h1)
+        ok = np.flatnonzero(p["a"] >= A_MIN)
+        if ok.size == 0:
+            continue
+        zb, ztop = p["zh"][ok[0]], p["zh"][ok[-1] + 1]
+        for z1 in np.arange(zb + LIFT, ztop - DZ_LAYER + 1., DZ_LAYER):
+            z2 = z1 + DZ_LAYER
+            k = (p["z"] > z1) & (p["z"] < z2)
+            if p["a"][k].mean() < A_MIN or p["a"][k].min() <= 0.:
+                continue
+            row = dict(rt=rt, rep=rep, hour=int(h0), zb=zb, z=0.5 * (z1 + z2), height=0.5 * (z1 + z2) - zb, a=p["a"][k].mean(),
+                       M=float(np.interp(0.5 * (z1 + z2), p["zh"], p["M"])), dlnM=1.e3 * np.log(np.interp(z2, p["zh"], p["M"]) / np.interp(z1, p["zh"], p["M"])) / DZ_LAYER)
+            for v in ("qt", "thl"):
+                eps, delta = layer_rates(p["z"], p["zh"], p["a"], p["M"], p[v + "_c"], p[v + "_e"], z1, z2)
+                src, tnd, atnd = layer_residuals(p["z"], p["zh"], p["a"], p["rho"], p["w_c"], p[v + "_c"], p[v + "_e"], p[v + "_S"], p[v + "_dt"], p["da_dt"], z1, z2)
+                row.update({f"eps_{v}": 1.e3 * eps, f"delta_{v}": 1.e3 * delta, f"src_{v}": 1.e3 * src, f"tend_{v}": 1.e3 * tnd})
+            row["atend"] = 1.e3 * atnd
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def summary(expt):
+    d = pd.concat([member_layers(expt, rt, rep) for rt, rep in itertools.product(RTS, range(1, 5))], ignore_index=True)
+    res = out_path(expt, "2stream", 1, 0).parents[2]
+    d.to_csv(res / "entrainment_layers.csv", index=False)
+    d["hbin"] = (np.floor(d.height / 250.) * 250. + 125.).astype(int)
+    cols = ["eps_qt", "eps_thl", "delta_qt", "dlnM", "src_qt", "tend_qt", "src_thl", "tend_thl", "atend", "a", "M"]
+    m = d.groupby(["rt", "rep", "hour", "hbin"])[cols].mean().reset_index()
+    full = m.groupby(["hour", "hbin"]).filter(lambda g: len(g) == 8)          # layers present in all eight members
+    e = ensemble(full, ["hour", "hbin"], cols)
+    e.to_csv(res / "entrainment_hourly.csv")
+    return d, e
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--expt", default="no_aerosols_zero_wind_v3")
+    a = ap.parse_args()
+    pd.set_option("display.width", 250); pd.set_option("display.max_rows", 200)
+    d, e = summary(a.expt)
+    show = lambda cols, keys=("1D", "3D", "d_over_se"): e.loc[:, [(c, k) for c in cols for k in keys]].to_string(float_format=lambda v: f"{v:.2f}")
+    print("--- bulk rates [1/km] by solar hour and height above the core base [m]; member mean, 3D minus 1D over its standard error")
+    print(show(["eps_qt", "eps_thl", "delta_qt", "dlnM"]))
+    print("\n--- neglected terms [1/km], member mean: source and tendency in eps (qt, thl), area tendency in delta")
+    print(show(["src_qt", "tend_qt", "src_thl", "tend_thl", "atend"], keys=("1D", "3D")))
