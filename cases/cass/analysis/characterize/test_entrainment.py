@@ -93,3 +93,18 @@ def test_bulk_rate_of_two_plumes():
         Ma, Mb = np.interp(Z[k], ZH, a["M"]), np.interp(Z[k], ZH, b["M"])
         out.append(eps / ((Ma * 2.e-4 + Mb * 1.2e-3).sum() / (Ma + Mb).sum()))
     assert abs(out[0] - 1.) < 0.01 and out[1] < 0.9
+
+
+def test_decaying_tracer_recovers_eps():
+    eps0, w, tau = 4.e-4, 2.5, 900.
+    zf = np.linspace(0., ZH[-1], 16001); Ce = 1.e-6 * np.exp(-zf / 800.); C = np.empty_like(zf); C[0] = 8.e-6
+    rhs = lambda c, ce: -eps0 * (c - ce) - c / (tau * w)
+    for i in range(zf.size - 1):
+        h = zf[i + 1] - zf[i]
+        k1 = rhs(C[i], Ce[i])
+        C[i + 1] = C[i] + h * rhs(C[i] + 0.5 * h * k1, 0.5 * (Ce[i] + Ce[i + 1]))
+    Cc, Cen = np.interp(Z, zf, C), np.interp(Z, zf, Ce)
+    p = plume(lambda z: np.full_like(z, eps0), lambda z: np.full_like(z, 2.e-3), w=w)
+    raw, _ = en.layer_rates(Z, ZH, p["a"], p["M"], Cc, Cen, 1000., 1250.)
+    src, _, _ = en.layer_residuals(Z, ZH, p["a"], p["rho"], np.full(ZH.size, w), Cc, Cen, -Cc / tau, np.zeros(Z.size), np.zeros(Z.size), 1000., 1250.)
+    assert raw > 2. * eps0 and abs(raw + src - eps0) < 1.e-6           # without the sink the tracer gives more than twice eps
