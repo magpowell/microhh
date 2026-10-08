@@ -229,28 +229,16 @@ def scaled_massflux(d):
     return pd.concat(out, ignore_index=True)
 
 
-def figure_scaled_massflux(expt, hours=(12, 13, 14, 15), s_grid=np.linspace(0., 0.95, 20)):
-    """Scaled core mass flux profiles, one column per hour; member mean and min-max band."""
-    import style as st
-    from style import plt
+def scaled_midlayer(expt):
+    """Scaled mass flux at mid-layer per hour and run (member mean, min, max), with the depth and the maximum."""
     d = scaled_massflux(layers(expt))
-    fig, axs = plt.subplots(1, len(hours), figsize=(10., 3.3), sharey=True, sharex=True, layout="constrained")
     rows = []
-    for j, (hour, ax) in enumerate(zip(hours, axs)):
-        for rt, lab in zip(RTS, ("1D", "3D")):
-            g = d[(d.rt == rt) & (d.hour == hour)]
-            prof = np.array([np.interp(s_grid, m.zhat.values, m.mhat.values, right=np.nan) for _, m in g.groupby("rep")])
-            ax.fill_betweenx(s_grid, np.nanmin(prof, axis=0), np.nanmax(prof, axis=0), alpha=0.25, lw=0, **st.RT[lab])
-            ax.plot(np.nanmean(prof, axis=0), s_grid, lw=1.8, label=lab, **st.RT[lab])
-            mid = prof[:, int(np.argmin(np.abs(s_grid - 0.5)))]
-            rows.append(dict(hour=hour, rt=lab, mhat_mid=mid.mean(), lo=mid.min(), hi=mid.max(), h=g.groupby("rep").h.first().mean(), Mb=g.groupby("rep").Mb.first().mean()))
-        ax.set(xlabel="core mass flux over its maximum [-]", xlim=(0., 1.05))
-        st.apply(ax)
-        st.panel(ax, j, f"{hour}-{hour + 1} LT")
-    axs[0].set(ylabel="height above the mass-flux maximum\nover the depth to the core top [-]", ylim=(0., 1.))
-    fig.legend(handles=axs[0].lines[:2], ncols=2, loc="outside lower center")
-    print(pd.DataFrame(rows).pivot(index="hour", columns="rt").round(3).to_string())
-    return st.savefig(fig, expt, "in_progress/fig_massflux_scaled")
+    for (hour, rt), g in d.groupby(["hour", "rt"]):
+        mid = np.array([np.interp(0.5, m.zhat.values, m.mhat.values) for _, m in g.groupby("rep")])
+        rows.append(dict(hour=hour, rt=rt, mhat_mid=mid.mean(), lo=mid.min(), hi=mid.max(), h=g.groupby("rep").h.first().mean(), Mb=g.groupby("rep").Mb.first().mean()))
+    out = pd.DataFrame(rows)
+    out.to_csv(out_path(expt, "2stream", 1, 0).parents[2] / "massflux_scaled.csv", index=False)
+    return out
 
 
 if __name__ == "__main__":
@@ -264,4 +252,6 @@ if __name__ == "__main__":
     print(show(["eps_qt", "eps_thl", "delta_qt", "dlnM"]))
     print("\n--- neglected terms [1/km], member mean: source and tendency in eps (qt, thl), area tendency in delta")
     print(show(["src_qt", "tend_qt", "src_thl", "tend_thl", "atend"], keys=("1D", "3D")))
-    print(figure_rates(a.expt)); print(figure_massflux(a.expt)); print(figure_scaled_massflux(a.expt))
+    print("\n--- core mass flux over its maximum at mid-layer (de Rooy and Siebesma 2008), depth above the maximum [m], maximum")
+    print(scaled_midlayer(a.expt).pivot(index="hour", columns="rt").round(3).to_string())
+    print(figure_rates(a.expt)); print(figure_massflux(a.expt))
