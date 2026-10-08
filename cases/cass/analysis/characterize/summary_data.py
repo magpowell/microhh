@@ -22,6 +22,7 @@ RHO, CP, LV = 1.1483, 1005., 2.501e6
 MIN_CLOUD_AREA = 40000.  # m2, 16 columns
 
 STATS_VARS = {
+    "default": ("tke", "u_2", "v_2", "w_2", "evisc", "evisc_2"),
     "thermo": ("ql_path", "ql_cover", "ql_frac", "ql", "thl_flux", "qt_flux"),
     "land_surface": ("H", "LE"),
     "radiation": ("sw_flux_dn", "sw_flux_up", "sw_flux_sfc_dir_rt", "sw_flux_sfc_dif_rt", "sw_flux_sfc_up_rt"),

@@ -896,3 +896,19 @@ stage these runs without `--space-checked`.
   0.05 U at 14 LT. The parallel runs carry the same lag (they were not compensated), so their wind is that many degrees
   off the shadow direction. Analyses should use the realised wind.
 - Before production: small-grid smoke test, as for the parallel runs.
+
+### Turbulence kinetic energy, base case (2026-10-08)
+
+Figures `in_progress/fig_tke` (metres, to 5 km) and `in_progress/fig_tke_scaled` (height over cloud-base height, to 2),
+both from `analysis/characterize/fig_tke.py`; table `tke_hourly.csv`. Resolved energy from the 300 s slab statistics.
+
+- Identical until 13 LT. From then the 3D excess grows with height: none in the lowest third of the boundary layer,
+  8 to 18 % in its top third (13 to 16 LT), 15 to 28 % in the lower cloud layer, 17 to 71 % in the upper cloud layer.
+  Cloud layer 1700 to 3000 m: 3D over 1D 1.19, 1.28, 1.45 at 13, 14, 15 LT.
+- **Note for the text (the figures show resolved energy only):** the Smagorinsky-Lilly closure carries no subgrid
+  energy. Diagnosed from the eddy viscosity as e = K_m^2 / (c_m Delta)^2, the local-equilibrium value implied by the
+  closure, with c_m = 0.12 as in the model's Deardorff-type scheme (Heus et al. 2010) and the model's wall-damped
+  mixing length, the subgrid part is about a tenth of the total (11 to 12 % in the subcloud layer, 6 to 9 % in the
+  cloud layer) and does not change the comparison: with it the 3D over 1D ratios are 1.19, 1.29, 1.46 in the cloud
+  layer and 1.02, 1.01, 1.03 in the subcloud layer. The estimate is good to a factor of about two (c_m 0.094 to
+  0.14), which scales both runs alike, and is a lower bound in stable layers. It is a diagnostic, not a model output.
