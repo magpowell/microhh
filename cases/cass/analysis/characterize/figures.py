@@ -97,14 +97,16 @@ def figure7(expt, vlim=3.e-3, hourly=False):
     return st.savefig(fig, expt, "in_progress/fig_forces" + ("" if hourly else "_snapshots"))
 
 
-def figure6_strip(expt, vlim=4.e-3, hourly=False, direction="parallel"):
+def figure6_strip(expt, vlim=4.e-3, hourly=False, direction="parallel", show=None):
     """Buoyancy anomaly and circulation in the sun-parallel slice, 1D, 3D and their difference, per snapshot or pooled
-    over each hour of the 60 s fields; bottom row: surface shortwave along the slice relative to the domain mean."""
+    over each hour of the 60 s fields; bottom row: surface shortwave along the slice relative to the domain mean.
+    show = rows to draw, the others left blank in an unchanged layout (builds for a presentation)."""
     times = list(HOURS) if hourly else snapshot_times(expt)
     rows = ("1D", "3D", "3D - 1D")
     fig = plt.figure(figsize=(2.1 * len(times) + 0.6, 7.4), layout="constrained")
     gs = fig.add_gridspec(4, len(times) + 1, height_ratios=(1, 1, 1, 0.3), width_ratios=[1] * len(times) + [0.05])
     k = 0
+    row_axes, sw_lines = {lab: [] for lab in rows}, {lab: [] for _, lab in RTS}     # for the presentation builds (show)
     SCALE, KEY = {"1D": 24., "3D": 24., "3D - 1D": 8.}, {"1D": 2., "3D - 1D": 0.5}     # the difference row has its own arrow scale
     for j, t in enumerate(times):
         if hourly:
@@ -116,6 +118,7 @@ def figure6_strip(expt, vlim=4.e-3, hourly=False, direction="parallel"):
         c["3D - 1D"] = c["3D"] - c["1D"]
         for i, lab in enumerate(rows):
             ax = fig.add_subplot(gs[i, j])
+            row_axes[lab].append(ax)
             d = c[lab]
             im = ax.pcolormesh(d["xl"], d["znd"], d["b"], cmap=CMAP_ANOM, vmin=-vlim, vmax=vlim, rasterized=True)
             q = d.isel(xl=slice(4, None, 12), znd=slice(4, None, 8))
@@ -139,6 +142,7 @@ def figure6_strip(expt, vlim=4.e-3, hourly=False, direction="parallel"):
                 e = ens_hour(expt, rt, *t).sel(dir=direction)
                 pct = (e["sw"] / e["sw_domain"] - 1.) * 100.
                 l, = ax.plot(e["xl"], pct, lw=1.6, label=lab, **st.RT[lab])
+                sw_lines[lab].append(l)
             else:
                 e, m = ens(expt, rt, t)
                 pct = np.array([(d["sw"].sel(dir=direction) / float(d["sw_domain"]) - 1.) * 100. for d in m])
@@ -156,13 +160,21 @@ def figure6_strip(expt, vlim=4.e-3, hourly=False, direction="parallel"):
         st.panel(ax, 3 * len(times) + j)
     cb = fig.colorbar(im, cax=fig.add_subplot(gs[:3, len(times)]), extend="both")
     cb.set_label(r"buoyancy anomaly [m s$^{-2}$]")
-    fig.legend(handles=h, ncols=2, loc="outside lower center")
+    leg = fig.legend(handles=h, ncols=2, loc="outside lower center")
+    if show is not None:        # same layout, only the rows in show drawn
+        fig.draw_without_rendering()
+        fig.set_layout_engine("none")
+        box = fig.get_tightbbox(fig.canvas.get_renderer()).padded(0.1)       # crop of the complete figure, so the builds overlay
+        for lab in rows:
+            for ax in row_axes[lab]:
+                ax.set_visible(lab in show)
+        for k, (_, lab) in enumerate(RTS):
+            for artist in sw_lines[lab] + [leg.legend_handles[k], leg.texts[k]]:
+                artist.set_visible(lab in show)
+    if show is not None:
+        path = st.outdir(expt) / "presentation" / ("fig_circulation" + ("" if direction == "parallel" else "_perp") + "_" + "_".join(show).replace(" ", "") + ".png")
+        path.parent.mkdir(exist_ok=True)
+        fig.savefig(path, dpi=300, bbox_inches=box)
+        plt.close(fig)
+        return path
     return st.savefig(fig, expt, "fig_circulation" + ("" if hourly else "_snapshots") + ("" if direction == "parallel" else "_perp"))
-
-
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--expt", default="no_aerosols_zero_wind_v3")
-    a = ap.parse_args()
-    for fn in (lambda e: figure6_strip(e, hourly=True), lambda e: figure7(e, hourly=True)):
-        print(fn(a.expt))
