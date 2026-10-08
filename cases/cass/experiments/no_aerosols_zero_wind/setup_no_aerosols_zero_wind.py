@@ -98,6 +98,10 @@ INPUT_ARGS = {"2stream_wind": WIND_INPUT_ARGS, "2stream_cass": WIND_INPUT_ARGS +
 # Sun-tracking wind (--sun-wind U): the v3 base case with a wind of speed U toward the shadow, nudged on 10 min above
 # 300 m (none below 50 m), geostrophic wind equal to the target. Root wind_sun_<U>_v3, 2stream and raytracer.
 SUN_WIND = None
+# Perpendicular variant: the target turned by SUN_ANGLE (clockwise from the anti-solar direction). -90 blows toward
+# azimuth + 90; the realised wind trails the rotating target by up to 8 deg, which then leaves a small component
+# toward the sun (about 0.14 U at noon). Root wind_perp_<U>_v3.
+SUN_ANGLE = 0.
 SUN = [("force", "nudgelist", "u,v,thl,qt"), ("force", "timedeplist_nudge", "u,v,thl,qt"), ("force", "swtimedep_geo", "true")]
 SUN_NUDGE = ["--nudge-wind-timescale", "600", "--nudge-wind-zbot", "50", "--nudge-wind-ztop", "300"]
 
@@ -105,7 +109,8 @@ SUN_NUDGE = ["--nudge-wind-timescale", "600", "--nudge-wind-zbot", "50", "--nudg
 def exp_root(version: str, debug: bool, tag: str = "") -> Path:
     base = SCRATCH / "CASS_LES" / ("debug" if debug else "experiments")
     if SUN_WIND is not None:
-        return base / (f"wind_sun_{SUN_WIND:.1f}".replace(".", "p") + f"_{version}" + (f"_{tag}" if tag else ""))
+        name = "wind_sun" if SUN_ANGLE == 0. else "wind_perp"
+        return base / (f"{name}_{SUN_WIND:.1f}".replace(".", "p") + f"_{version}" + (f"_{tag}" if tag else ""))
     return base / (f"{EXP_NAME}_{version}" + (f"_{tag}" if tag else ""))
 
 DEBUG_GRID = {"itot": "64", "jtot": "64", "xsize": "6400.", "ysize": "6400."}
@@ -267,7 +272,7 @@ def setup_rep(rt: str, rep: int, dry_run: bool, debug: bool = False, version: st
     if input_args is None:
         input_args = INPUT_ARGS.get(rt, V3_INPUT_ARGS) if version == "v3" else ["--zero-winds"]
         if SUN_WIND is not None:
-            input_args = ["--sun-wind", str(SUN_WIND)] + SUN_NUDGE + V3_INPUT_ARGS[1:]
+            input_args = ["--sun-wind", str(SUN_WIND), "--sun-wind-angle", str(SUN_ANGLE)] + SUN_NUDGE + V3_INPUT_ARGS[1:]
     if dry_run:
         print("  [dry] python cass_input.py " + " ".join(input_args))
         return
@@ -300,12 +305,19 @@ def main():
     parser.add_argument("--reps", type=int, nargs="+", default=None, help="subset of the members (default: all)")
     parser.add_argument("--sun-wind", type=float, default=None, metavar="U",
                         help="v3 base case with a sun-tracking wind of U m/s (root wind_sun_<U>_v3)")
+    parser.add_argument("--sun-wind-angle", type=float, default=0., metavar="DEG",
+                        help="with --sun-wind: target turned clockwise from the anti-solar direction (root wind_perp_<U>_v3)")
+    parser.add_argument("--space-checked", action="store_true",
+                        help="confirms scratch has room for the production runs (about 1.3 TB per configuration of four members)")
     parser.add_argument("--input-args", nargs=argparse.REMAINDER, default=None,
                         help="arguments for cass_input.py, replacing the version default (must come last)")
     args = parser.parse_args()
 
-    global SUN_WIND
-    SUN_WIND = args.sun_wind
+    global SUN_WIND, SUN_ANGLE
+    SUN_WIND, SUN_ANGLE = args.sun_wind, args.sun_wind_angle
+    if SUN_ANGLE != 0. and not args.debug and not args.dry_run and not args.space_checked:
+        raise SystemExit("wind_perp production runs: free scratch space first (2026-10-08: 17 of 20 TiB used); "
+                         "pass --space-checked once there is room for about 1.3 TB per configuration")
     if SUN_WIND is not None and (args.version != "v3" or any(r not in ("2stream", "raytracer") for r in (args.rt or []))):
         raise SystemExit("--sun-wind is for v3 with 2stream and raytracer")
     if SUN_WIND is not None and args.rt is None:

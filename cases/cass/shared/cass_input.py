@@ -46,6 +46,8 @@ parser.add_argument('--cass-winds', action='store_true',
                          'nudging target (time-dependent u_geo, v_geo). Needs [force] swtimedep_geo=true and '
                          'u,v in nudgelist and timedeplist_nudge.')
 parser.add_argument('--nudge-wind-timescale', type=float, default=3600., metavar='SECONDS')
+parser.add_argument('--sun-wind-angle', type=float, default=0., metavar='DEG',
+                    help='with --sun-wind: target direction turned clockwise from the anti-solar direction (0: toward the shadow)')
 parser.add_argument('--nudge-wind-zbot', type=float, default=None, metavar='M',
                     help='with --sun-wind: no wind nudging below this height, so the surface layer forms on its own')
 parser.add_argument('--nudge-wind-ztop', type=float, default=None, metavar='M',
@@ -357,7 +359,7 @@ elif args.wind_u is not None:
 elif args.geo_wind is not None:
     u_init = np.full(kmax, args.geo_wind); v_init = np.zeros(kmax)
 elif args.sun_wind is not None:
-    az0 = np.radians(solar_azimuth_deg(0.0, lat, lon, doy_start, hour_utc_start))
+    az0 = np.radians(solar_azimuth_deg(0.0, lat, lon, doy_start, hour_utc_start) + args.sun_wind_angle)
     u_init = np.full(kmax, -args.sun_wind * np.sin(az0))
     v_init = np.full(kmax, -args.sun_wind * np.cos(az0))
 else:
@@ -411,7 +413,7 @@ elif args.wind_u is not None:
 elif args.geo_wind is not None:
     u_nudge_arr = np.full_like(uls, args.geo_wind); v_nudge_arr = np.zeros_like(vls)
 elif args.sun_wind is not None:
-    az_t = np.radians(solar_azimuth_deg(time_ls, lat, lon, doy_start, hour_utc_start))
+    az_t = np.radians(solar_azimuth_deg(time_ls, lat, lon, doy_start, hour_utc_start) + args.sun_wind_angle)
     u_target = -args.sun_wind * np.sin(az_t)   # shape (n_times,)
     v_target = -args.sun_wind * np.cos(az_t)
     u_nudge_arr = np.broadcast_to(u_target[:, None], (n_times, kmax)).copy()

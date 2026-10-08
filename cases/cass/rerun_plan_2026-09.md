@@ -874,3 +874,25 @@ Done or queued:
 - Cloud-base series: the entraining parcel finds no level of free convection below 4.8 km before 12.4 LT; the
   barrier is undefined there (NaN, `lfc_<tag>` flag), not 150 J kg-1.
 Not planned: snapshot mean state at 5-min cadence; more frames for the per-cloud relations.
+
+### Perpendicular wind runs (planned 2026-10-08, NOT staged or submitted)
+
+**SPACE MUST BE FREED BEFORE ANY PRODUCTION RUN.** Scratch was at 17 of 20 TiB on 2026-10-08 with about 2.3 TB still
+to be written by running jobs; each configuration of four members needs about 1.3 TB. The setup script refuses to
+stage these runs without `--space-checked`.
+
+- Purpose: the counterpart of `wind_sun_<U>_v3`. There the wind carries a cloud onto the ground its own shadow has
+  cooled; here it carries the cloud across the sun line, onto ground that shadow never touched.
+- 3D radiation only. Two-stream radiation has no azimuth, so a 1D perpendicular run is statistically the 1D parallel
+  run already made.
+- Setup: `setup_no_aerosols_zero_wind.py --version v3 --sun-wind U --sun-wind-angle -90 --rt raytracer` (root
+  `wind_perp_<U>_v3`). The target blows toward the solar azimuth plus 90 degrees and rotates with the sun; the
+  geostrophic wind equals it; nudging as in the parallel runs (600 s above 300 m, none below 50 m). The staged input
+  differs from the parallel one only in u, v and their targets (checked on a small test input: 90.000 degrees from the
+  sun line at all hours).
+- Known imperfection, accepted: the realised wind trails the rotating target (2.6, 4.7, 8.3, 7.8, 6.3, 3.3, 1.7
+  degrees at 10, 11, 12, 12.5, 13, 14, 16 LT at 1500 m in the parallel 2.5 m/s runs), and turns a further 5 to 8
+  degrees near the surface. With the angle of -90 this leaves a component TOWARD THE SUN of about 0.14 U at noon and
+  0.05 U at 14 LT. The parallel runs carry the same lag (they were not compensated), so their wind is that many degrees
+  off the shadow direction. Analyses should use the realised wind.
+- Before production: small-grid smoke test, as for the parallel runs.
