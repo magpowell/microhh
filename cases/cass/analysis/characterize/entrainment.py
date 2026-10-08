@@ -7,10 +7,10 @@ the slab, over a layer z1..z2:
     delta = eps - ln(M(z2) / M(z1)) / (z2 - z1)
 qt is the variable of record, thl the check; the decaying surface tracer gives a third estimate, eps plus its known sink
 C_c / (TAU w_c) (the sink term is as large as eps itself, so this one rests on the core-mean speed). Samples are the 300 s statistics of the model's qlcore mask (cloudy and buoyant; no ascent condition, unlike masks.core),
-averaged per solar hour. The cloud layer runs from the hourly cloud base (lowest level with a cloud fraction of A_MIN) to
-the top of the core; rates are given from START above cloud base, about its lowest quarter (200 to 330 m here; one
-height for both runs so the profiles start together), below which air joins the core by condensing and not by
-mixing (organised inflow; Drueke et al. 2020; Dawe and Austin 2013), in layers with a mean core area of A_MIN. The terms the
+averaged per solar hour. Heights are measured from the level of the largest core mass flux, the cloud base of
+de Rooy and Siebesma (2008), up to the top of the core; below it the mass flux still grows as air joins the core by
+condensing, not by mixing (organised inflow; Drueke et al. 2020; Dawe and Austin 2013). Layers need a mean core area
+of A_MIN. The terms the
 two formulas neglect are returned as rates in the same units: sources (microphysics, radiation) and time tendencies.
 These are bulk dilution and detrainment rates; directly measured exchange rates are about twice as large (Romps 2010).
 """
@@ -28,7 +28,7 @@ from snapshot import out_path, run_dir
 RTS = ("2stream", "raytracer")
 HOURS = tuple((float(h), float(h + 1)) for h in range(11, 17))
 DZ_LAYER = 250.          # m
-START = 300.             # m above cloud base, about the lowest quarter of the cloud layer: organised inflow below (Drueke et al. 2020)
+START = 0.               # m above the mass-flux maximum (the cloud base of de Rooy and Siebesma 2008); organised inflow below
 A_MIN = 1.e-3
 SOURCES = {"qt": ("qtt_micro",), "thl": ("thlt_micro", "thlt_rad")}
 TAU = 900.               # s, decay time of the surface tracer (couvreux)
@@ -83,7 +83,7 @@ def hour_profiles(rd, h0, h1):
     return out
 
 
-def member_layers(expt, rt, rep, dz=DZ_LAYER):
+def member_layers(expt, rt, rep, dz=DZ_LAYER, ref="peak"):
     rd = run_dir(expt, rt, rep)
     rows = []
     for h0, h1 in HOURS:
@@ -91,8 +91,9 @@ def member_layers(expt, rt, rep, dz=DZ_LAYER):
         ok = np.flatnonzero(p["a"] >= A_MIN)
         if ok.size == 0:
             continue
-        zb, ztop = p["zh"][np.argmax(p["cf"] >= A_MIN)], p["zh"][ok[-1] + 1]      # cloud base: cloud fraction of A_MIN
+        zcloud, ztop = p["zh"][np.argmax(p["cf"] >= A_MIN)], p["zh"][ok[-1] + 1]      # cloud base: cloud fraction of A_MIN
         zcore = p["zh"][ok[0]]
+        zb = p["zh"][int(np.argmax(np.where(p["zh"] <= ztop, p["M"], 0.)))] if ref == "peak" else zcloud      # level of the largest core mass flux
         for z1 in np.arange(zb, ztop - dz + 1., dz):            # mass flux, area and speed from cloud base; rates from START
             z2 = z1 + dz
             k = (p["z"] > z1) & (p["z"] < z2)
@@ -100,7 +101,7 @@ def member_layers(expt, rt, rep, dz=DZ_LAYER):
             rates = above and p["a"][k].mean() >= A_MIN and p["a"][k].min() > 0.
             if p["a"][k].mean() <= 0. or (above and not rates):
                 continue
-            row = dict(rt=rt, rep=rep, hour=int(h0), zb=zb, zcore=zcore, ztop=ztop, z=0.5 * (z1 + z2), height=0.5 * (z1 + z2) - zb, a=p["a"][k].mean(),
+            row = dict(rt=rt, rep=rep, hour=int(h0), zb=zb, zcloud=zcloud, zcore=zcore, ztop=ztop, z=0.5 * (z1 + z2), height=0.5 * (z1 + z2) - zb, a=p["a"][k].mean(),
                        M=float(np.interp(0.5 * (z1 + z2), p["zh"], p["M"])), dlnM=1.e3 * np.log(np.interp(z2, p["zh"], p["M"]) / np.interp(z1, p["zh"], p["M"])) / dz)
             if not rates:
                 row.update(w_c=float(np.interp(0.5 * (z1 + z2), p["zh"], p["w_c"])))
@@ -132,12 +133,12 @@ def summary(expt):
     return d, e
 
 
-YLIM = (START, 1300.)
+YLIM = (0., 1150.)
 SPLIT = {"area": ("a", dict(color="k", ls="-")), "speed": ("w_c", dict(color="0.5", ls="--"))}      # a ratio is neither run
 
 
 def layers(expt, dz=100.):
-    f = out_path(expt, "2stream", 1, 0).parents[2] / f"entrainment_layers_dz{dz:.0f}.csv"
+    f = out_path(expt, "2stream", 1, 0).parents[2] / f"entrainment_layers_dz{dz:.0f}_peak.csv"
     if not f.exists():
         pd.concat([member_layers(expt, rt, rep, dz) for rt, rep in itertools.product(RTS, range(1, 5))], ignore_index=True).to_csv(f, index=False)
     return pd.read_csv(f)
@@ -167,7 +168,7 @@ def _frame(axs, hours, st):
         st.apply(ax)
         st.panel(ax, k)
     for ax in axs[:, 0]:
-        ax.set_ylabel("height above cloud base [m]")
+        ax.set_ylabel("height above the\nmass-flux maximum [m]")
     axs[0, 0].set_ylim(*YLIM)
     for ax, hour in zip(axs[0], hours):
         ax.annotate(f"{hour}-{hour + 1} LT", xy=(0.5, 1.), xycoords="axes fraction", xytext=(0, 20), textcoords="offset points", ha="center", va="bottom", fontsize=11)
@@ -197,7 +198,6 @@ def figure_massflux(expt, hours=(12, 13, 14, 15)):
     from matplotlib.lines import Line2D
     from style import plt
     d = layers(expt)
-    d = d[d.eps_qt.notna()]           # from START above cloud base, as the rates
     fig, axs = plt.subplots(2, len(hours), figsize=(10., 5.6), sharey=True, sharex="row", layout="constrained")
     for j, hour in enumerate(hours):
         _both(axs[0, j], d, hour, "M", st)
@@ -215,6 +215,44 @@ def figure_massflux(expt, hours=(12, 13, 14, 15)):
     return st.savefig(fig, expt, "in_progress/fig_core_massflux")
 
 
+def scaled_massflux(d):
+    """Per member and hour: mass flux over its maximum against height above the level of that maximum over the depth
+    to the core top (de Rooy and Siebesma 2008, their figure 8a)."""
+    out = []
+    for (rt, rep, hour), g in d.groupby(["rt", "rep", "hour"]):
+        g = g.sort_values("height")
+        k = int(np.argmax(g.M.values))
+        zmax, top = g.height.values[k], float(g.ztop.iloc[0] - g.zb.iloc[0])
+        u = g.iloc[k:]
+        out.append(pd.DataFrame(dict(rt=rt, rep=rep, hour=hour, zhat=(u.height.values - zmax) / (top - zmax), mhat=u.M.values / g.M.values[k],
+                                     h=top - zmax, Mb=g.M.values[k])))
+    return pd.concat(out, ignore_index=True)
+
+
+def figure_scaled_massflux(expt, hours=(12, 13, 14, 15), s_grid=np.linspace(0., 0.95, 20)):
+    """Scaled core mass flux profiles, one column per hour; member mean and min-max band."""
+    import style as st
+    from style import plt
+    d = scaled_massflux(layers(expt))
+    fig, axs = plt.subplots(1, len(hours), figsize=(10., 3.3), sharey=True, sharex=True, layout="constrained")
+    rows = []
+    for j, (hour, ax) in enumerate(zip(hours, axs)):
+        for rt, lab in zip(RTS, ("1D", "3D")):
+            g = d[(d.rt == rt) & (d.hour == hour)]
+            prof = np.array([np.interp(s_grid, m.zhat.values, m.mhat.values, right=np.nan) for _, m in g.groupby("rep")])
+            ax.fill_betweenx(s_grid, np.nanmin(prof, axis=0), np.nanmax(prof, axis=0), alpha=0.25, lw=0, **st.RT[lab])
+            ax.plot(np.nanmean(prof, axis=0), s_grid, lw=1.8, label=lab, **st.RT[lab])
+            mid = prof[:, int(np.argmin(np.abs(s_grid - 0.5)))]
+            rows.append(dict(hour=hour, rt=lab, mhat_mid=mid.mean(), lo=mid.min(), hi=mid.max(), h=g.groupby("rep").h.first().mean(), Mb=g.groupby("rep").Mb.first().mean()))
+        ax.set(xlabel="core mass flux over its maximum [-]", xlim=(0., 1.05))
+        st.apply(ax)
+        st.panel(ax, j, f"{hour}-{hour + 1} LT")
+    axs[0].set(ylabel="height above the mass-flux maximum\nover the depth to the core top [-]", ylim=(0., 1.))
+    fig.legend(handles=axs[0].lines[:2], ncols=2, loc="outside lower center")
+    print(pd.DataFrame(rows).pivot(index="hour", columns="rt").round(3).to_string())
+    return st.savefig(fig, expt, "in_progress/fig_massflux_scaled")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--expt", default="no_aerosols_zero_wind_v3")
@@ -222,8 +260,8 @@ if __name__ == "__main__":
     pd.set_option("display.width", 250); pd.set_option("display.max_rows", 200)
     d, e = summary(a.expt)
     show = lambda cols, keys=("1D", "3D", "d_over_se"): e.loc[:, [(c, k) for c in cols for k in keys]].to_string(float_format=lambda v: f"{v:.2f}")
-    print("--- bulk rates [1/km] by solar hour and height above cloud base [m]; member mean, 3D minus 1D over its standard error")
+    print("--- bulk rates [1/km] by solar hour and height above the mass-flux maximum [m]; member mean, 3D minus 1D over its standard error")
     print(show(["eps_qt", "eps_thl", "delta_qt", "dlnM"]))
     print("\n--- neglected terms [1/km], member mean: source and tendency in eps (qt, thl), area tendency in delta")
     print(show(["src_qt", "tend_qt", "src_thl", "tend_thl", "atend"], keys=("1D", "3D")))
-    print(figure_rates(a.expt)); print(figure_massflux(a.expt))
+    print(figure_rates(a.expt)); print(figure_massflux(a.expt)); print(figure_scaled_massflux(a.expt))
