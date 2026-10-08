@@ -163,56 +163,56 @@ def _both(ax, d, hour, v, st):
         ax.plot(g.mean(axis=1), g.index, lw=1.8, label=lab, **st.RT[lab])
 
 
-def _frame(axs, hours, st):
-    for k, ax in enumerate(axs.ravel()):
-        st.apply(ax)
-        st.panel(ax, k)
-    for ax in axs[:, 0]:
-        ax.set_ylabel("height above the\nmass-flux maximum [m]")
-    axs[0, 0].set_ylim(*YLIM)
-    for ax, hour in zip(axs[0], hours):
-        ax.annotate(f"{hour}-{hour + 1} LT", xy=(0.5, 1.), xycoords="axes fraction", xytext=(0, 20), textcoords="offset points", ha="center", va="bottom", fontsize=11)
-
-
-def figure_rates(expt, hours=(12, 13, 14, 15)):
-    """Bulk entrainment and detrainment rates of the core against height above its base, one column per hour;
-    member mean and min-max band where at least three members have a core."""
-    import style as st
-    from style import plt
-    d = layers(expt)
-    rows = (("eps_qt", "entrainment [km$^{-1}$]", (0., 0.65)), ("delta_qt", "detrainment [km$^{-1}$]", (0., 7.)))
-    fig, axs = plt.subplots(2, len(hours), figsize=(10., 5.4), sharey=True, sharex="row", layout="constrained")
-    for i, (v, name, xlim) in enumerate(rows):
-        for j, hour in enumerate(hours):
-            _both(axs[i, j], d, hour, v, st)
-            axs[i, j].set(xlabel=name, xlim=xlim)
-    _frame(axs, hours, st)
-    fig.legend(handles=axs[0, 0].lines[:2], ncols=2, loc="outside lower center")
-    return st.savefig(fig, expt, "in_progress/fig_entrainment")
-
-
-def figure_massflux(expt, hours=(12, 13, 14, 15)):
-    """Core mass flux of both runs, and the 3D over 1D ratio of its two factors, core area and core speed (paired by
-    member; mean and min-max band over the pairs)."""
+def figure_plume(expt, hours=(12, 13, 14, 15)):
+    """The core as a bulk plume against height above its mass-flux maximum, one column per hour. Top: core mass
+    flux. Middle: entrainment and detrainment rates on one axis (their difference is the fractional change of the mass
+    flux with height). Bottom: 3D over 1D ratio of its two factors, core area and core speed, paired by member. Member
+    mean and min-max band where at least three members (pairs) have a core."""
     import style as st
     from matplotlib.lines import Line2D
     from style import plt
     d = layers(expt)
-    fig, axs = plt.subplots(2, len(hours), figsize=(10., 5.6), sharey=True, sharex="row", layout="constrained")
+    kinds = (("delta_qt", "detrainment", "-"), ("eps_qt", "entrainment", "--"))
+    names = ("core mass flux [kg m$^{-2}$ s$^{-1}$]", "rate [km$^{-1}$]", "3D / 1D [-]")
+    fig, axs = plt.subplots(3, len(hours), figsize=(10., 10.), sharey=True, sharex="row", layout="constrained")
+    fig.get_layout_engine().set(hspace=0.12)
     for j, hour in enumerate(hours):
         _both(axs[0, j], d, hour, "M", st)
-        axs[0, j].set(xlabel="core mass flux [kg m$^{-2}$ s$^{-1}$]", xlim=(0., 0.06))
-        ax = axs[1, j]
+        axs[0, j].set(xlim=(0., 0.06), xticks=[0., 0.02, 0.04])       # no tick label at the edge: it would run into the next panel
+        for v, _, ls in kinds:
+            for rt, lab in zip(RTS, ("1D", "3D")):
+                g = _members(d, rt, hour, v)
+                axs[1, j].fill_betweenx(g.index, g.min(axis=1), g.max(axis=1), alpha=0.25, lw=0, **st.RT[lab])
+                axs[1, j].plot(g.mean(axis=1), g.index, lw=1.8, ls=ls, **st.RT[lab])
+        axs[1, j].set(xlim=(0., 7.), xticks=[0, 2, 4, 6])
+        ax = axs[2, j]
         ax.axvline(1., color="0.75", lw=0.8, zorder=0)
         for lab, (v, kw) in SPLIT.items():
             r = paired_ratio(d, hour, v)
             ax.fill_betweenx(r.index, r.min(axis=1), r.max(axis=1), alpha=0.25, lw=0, color=kw["color"])
             ax.plot(r.mean(axis=1), r.index, lw=1.6, **kw)
-        ax.set(xlabel="3D / 1D [-]", xlim=(0.75, 3.05), xticks=[1., 1.5, 2., 2.5, 3.])
-    _frame(axs, hours, st)
-    h = axs[0, 0].lines[:2] + [Line2D([], [], lw=1.6, label=lab, **kw) for lab, (_, kw) in SPLIT.items()]
-    fig.legend(handles=h, ncols=4, loc="outside lower center")
-    return st.savefig(fig, expt, "in_progress/fig_core_massflux")
+        ax.set(xlim=(0.75, 3.05), xticks=[1., 1.5, 2., 2.5, 3.])
+    for k, ax in enumerate(axs.ravel()):
+        st.apply(ax)
+        ax.tick_params(labelsize=10)
+        ax.set_ylim(*YLIM)
+        ax.set_title(f"({'abcdefghijklmnopqrstuvwxyz'[k]})", loc="left", fontsize=13)
+    gs = axs[0, 0].get_gridspec()
+    for i, name in enumerate(names):          # one label under each row, on an empty axes that spans it
+        span = fig.add_subplot(gs[i, :], frameon=False)
+        span.tick_params(labelcolor="none", bottom=False, left=False)
+        span.set_xlabel(name, fontsize=12, labelpad=8)
+        span.patch.set_visible(False)
+        span.set_zorder(-1)
+    fig.supylabel("height above mass-flux maximum [m]", fontsize=12)
+    for ax, hour in zip(axs[0], hours):
+        ax.annotate(f"{hour}-{hour + 1} LT", xy=(0.5, 1.), xycoords="axes fraction", xytext=(0, 24), textcoords="offset points", ha="center", va="bottom", fontsize=13)
+    # one key per row, in its first panel, where the 12-13 LT core is shallowest
+    kw = dict(loc="upper right", fontsize=10, handlelength=2.6, borderaxespad=0.2)
+    axs[0, 0].legend(handles=[Line2D([], [], lw=1.8, label=lab, **st.RT[lab]) for lab in ("1D", "3D")], **kw)
+    axs[1, 0].legend(handles=[Line2D([], [], color="k", lw=1.8, ls=ls, label=name) for _, name, ls in kinds], **kw)
+    axs[2, 0].legend(handles=[Line2D([], [], lw=1.6, label=lab, **k2) for lab, (_, k2) in SPLIT.items()], **kw)
+    return st.savefig(fig, expt, "in_progress/fig_plume")
 
 
 def scaled_massflux(d):
@@ -254,4 +254,4 @@ if __name__ == "__main__":
     print(show(["src_qt", "tend_qt", "src_thl", "tend_thl", "atend"], keys=("1D", "3D")))
     print("\n--- core mass flux over its maximum at mid-layer (de Rooy and Siebesma 2008), depth above the maximum [m], maximum")
     print(scaled_midlayer(a.expt).pivot(index="hour", columns="rt").round(3).to_string())
-    print(figure_rates(a.expt)); print(figure_massflux(a.expt))
+    print(figure_plume(a.expt))
