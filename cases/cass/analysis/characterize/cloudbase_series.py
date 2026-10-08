@@ -26,7 +26,7 @@ ZB_THR = 1.e-3
 EPS = {"undilute": 0., "entraining": 5.e-4}      # 1/m; the measured bulk rate is about 5e-4
 Z_TOP = 4800.                                    # sponge starts here
 ROOT_FRACS = (0.5, 0.9)
-W_BINS = np.arange(0., 12.05, 0.1)               # m/s, as in snapshot.py
+W_BINS = np.arange(-4., 12.05, 0.1)              # m/s; the core holds sinking points too
 HOURS = ((12., 13.), (13., 14.), (14., 15.), (15., 16.))
 
 
@@ -152,7 +152,7 @@ def load_hist(expt):
     return out
 
 
-def figure4r(expt, xmax=7., step=0.28):
+def figure4r(expt, xmin=-1., xmax=7., step=0.28):
     """The same distributions as a ridgeline: one row per hour on a shared axis, kernel density estimate (scipy
     gaussian_kde, Scott's rule) of the core speeds of all members, from the 0.1 m/s counts."""
     import style as st
@@ -160,7 +160,7 @@ def figure4r(expt, xmax=7., step=0.28):
     from style import plt
     H = load_hist(expt)
     x = 0.5 * (W_BINS[:-1] + W_BINS[1:])
-    xs = np.linspace(0., xmax, 400)
+    xs = np.linspace(xmin, xmax, 400)
     fig, ax = plt.subplots(figsize=(4.6, 4.6), layout="constrained")
     h, ticks = [], []
     for k, (h0, h1) in enumerate(HOURS):
@@ -175,7 +175,7 @@ def figure4r(expt, xmax=7., step=0.28):
                 h.append(line)
         ax.axhline(base, color="0.6", lw=0.6, zorder=front)
         ticks.append((base, f"{h0:.0f}-{h1:.0f} LT"))
-    ax.set(xlim=(0., xmax), xlabel=r"core vertical velocity at cloud base [m s$^{-1}$]")
+    ax.set(xlim=(xmin, xmax), xlabel=r"core vertical velocity at cloud base [m s$^{-1}$]")
     ax.set_yticks([t for t, _ in ticks], [l for _, l in ticks])
     ax.tick_params(axis="y", length=0)
     ax.set_ylim(0., (len(HOURS) - 1) * step + 0.5)

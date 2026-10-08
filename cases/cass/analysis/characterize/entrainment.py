@@ -130,8 +130,9 @@ def figure(expt, hours=(12, 13, 14, 15), min_members=3, dz=100.):
     if not f.exists():
         pd.concat([member_layers(expt, rt, rep, dz) for rt, rep in itertools.product(RTS, range(1, 5))], ignore_index=True).to_csv(f, index=False)
     d = pd.read_csv(f)
-    rows = (("eps_qt", "entrainment [km$^{-1}$]"), ("delta_qt", "detrainment [km$^{-1}$]"), ("M", "core mass flux [kg m$^{-2}$ s$^{-1}$]"))
-    fig, axs = plt.subplots(len(rows), len(hours), figsize=(2.3 * len(hours) + 0.8, 7.6), sharey=True, sharex="row", layout="constrained")
+    rows = (("eps_qt", "entrainment [km$^{-1}$]"), ("delta_qt", "detrainment [km$^{-1}$]"), ("M", "core mass flux [kg m$^{-2}$ s$^{-1}$]"),
+            ("a", "core area fraction [-]"), ("w_c", "core vertical velocity [m s$^{-1}$]"))
+    fig, axs = plt.subplots(len(rows), len(hours), figsize=(2.3 * len(hours) + 0.8, 2.5 * len(rows)), sharey=True, sharex="row", layout="constrained")
     h = []
     for j, hour in enumerate(hours):
         for i, (v, name) in enumerate(rows):
