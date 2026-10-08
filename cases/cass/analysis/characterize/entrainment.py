@@ -7,7 +7,8 @@ the slab, over a layer z1..z2:
     delta = eps - ln(M(z2) / M(z1)) / (z2 - z1)
 qt is the variable of record, thl the check; the decaying surface tracer gives a third estimate, eps plus its known sink
 C_c / (TAU w_c) (the sink term is as large as eps itself, so this one rests on the core-mean speed). Samples are the 300 s statistics of the qlcore mask (cloudy and buoyant),
-averaged per solar hour; layers start LIFT above the hourly core base and need a mean core area of A_MIN. The terms the
+averaged per solar hour; layers start LIFT above the hourly cloud base (lowest level with a cloud fraction of A_MIN)
+and need a mean core area of A_MIN. The terms the
 two formulas neglect are returned as rates in the same units: sources (microphysics, radiation) and time tendencies.
 These are bulk dilution and detrainment rates; directly measured exchange rates are about twice as large (Romps 2010).
 """
@@ -25,7 +26,7 @@ from snapshot import out_path, run_dir
 RTS = ("2stream", "raytracer")
 HOURS = tuple((float(h), float(h + 1)) for h in range(11, 17))
 DZ_LAYER = 250.          # m
-LIFT = 200.              # m above the core base
+LIFT = 250.              # m above cloud base; the core is still forming below
 A_MIN = 1.e-3
 SOURCES = {"qt": ("qtt_micro",), "thl": ("thlt_micro", "thlt_rad")}
 TAU = 900.               # s, decay time of the surface tracer (couvreux)
@@ -62,7 +63,8 @@ def hour_profiles(rd, h0, h1):
         area, areah, w = g(c, "default", "area"), g(c, "default", "areah"), g(c, "default", "w")
         rho, rhoh = g(d, "thermo", "rho"), g(d, "thermo", "rhoh")
         a = area.mean(axis=0)
-        out = dict(z=z, zh=zh, a=a, rho=rho.mean(axis=0), M=(rhoh * areah * w).mean(axis=0), n=t.size,
+        cf = g(d, "thermo", "ql_frac").mean(axis=0)
+        out = dict(z=z, zh=zh, a=a, cf=cf, rho=rho.mean(axis=0), M=(rhoh * areah * w).mean(axis=0), n=t.size,
                    w_c=(areah * w).mean(axis=0) / np.maximum(areah.mean(axis=0), 1.e-12))
         cm = lambda x: (area * x).mean(axis=0) / np.maximum(a, 1.e-12)                 # core mean, area weighted
         half = t.size // 2
@@ -87,14 +89,20 @@ def member_layers(expt, rt, rep, dz=DZ_LAYER):
         ok = np.flatnonzero(p["a"] >= A_MIN)
         if ok.size == 0:
             continue
-        zb, ztop = p["zh"][ok[0]], p["zh"][ok[-1] + 1]
-        for z1 in np.arange(zb + LIFT, ztop - dz + 1., dz):
+        zb, ztop = p["zh"][np.argmax(p["cf"] >= A_MIN)], p["zh"][ok[-1] + 1]      # cloud base: cloud fraction of A_MIN
+        zcore = p["zh"][ok[0]]
+        for z1 in np.arange(zb, ztop - dz + 1., dz):            # mass flux, area and speed from cloud base; rates from LIFT
             z2 = z1 + dz
             k = (p["z"] > z1) & (p["z"] < z2)
-            if p["a"][k].mean() < A_MIN or p["a"][k].min() <= 0.:
+            rates = z1 >= zb + LIFT and p["a"][k].mean() >= A_MIN and p["a"][k].min() > 0.
+            if p["a"][k].mean() <= 0. or (z1 >= zb + LIFT and not rates):
                 continue
-            row = dict(rt=rt, rep=rep, hour=int(h0), zb=zb, z=0.5 * (z1 + z2), height=0.5 * (z1 + z2) - zb, a=p["a"][k].mean(),
+            row = dict(rt=rt, rep=rep, hour=int(h0), zb=zb, zcore=zcore, z=0.5 * (z1 + z2), height=0.5 * (z1 + z2) - zb, a=p["a"][k].mean(),
                        M=float(np.interp(0.5 * (z1 + z2), p["zh"], p["M"])), dlnM=1.e3 * np.log(np.interp(z2, p["zh"], p["M"]) / np.interp(z1, p["zh"], p["M"])) / dz)
+            if not rates:
+                row.update(w_c=float(np.interp(0.5 * (z1 + z2), p["zh"], p["w_c"])))
+                rows.append(row)
+                continue
             for v in ("qt", "thl"):
                 eps, delta = layer_rates(p["z"], p["zh"], p["a"], p["M"], p[v + "_c"], p[v + "_e"], z1, z2)
                 src, tnd, atnd = layer_residuals(p["z"], p["zh"], p["a"], p["rho"], p["w_c"], p[v + "_c"], p[v + "_e"], p[v + "_S"], p[v + "_dt"], p["da_dt"], z1, z2)
@@ -121,42 +129,87 @@ def summary(expt):
     return d, e
 
 
-def figure(expt, hours=(12, 13, 14, 15), min_members=3, dz=100.):
-    """Profiles of the bulk entrainment and detrainment rates against height above the core base, one column per hour;
-    member mean and min-max band where at least min_members members have a core; layers dz thick."""
-    import style as st
-    from style import plt
+YLIM = (0., 1300.)
+SPLIT = {"area": ("a", dict(color="k", ls="-")), "speed": ("w_c", dict(color="0.5", ls="--"))}      # a ratio is neither run
+
+
+def layers(expt, dz=100.):
     f = out_path(expt, "2stream", 1, 0).parents[2] / f"entrainment_layers_dz{dz:.0f}.csv"
     if not f.exists():
         pd.concat([member_layers(expt, rt, rep, dz) for rt, rep in itertools.product(RTS, range(1, 5))], ignore_index=True).to_csv(f, index=False)
-    d = pd.read_csv(f)
-    rows = (("eps_qt", "entrainment [km$^{-1}$]"), ("delta_qt", "detrainment [km$^{-1}$]"), ("M", "core mass flux [kg m$^{-2}$ s$^{-1}$]"),
-            ("a", "core area fraction [-]"), ("w_c", "core vertical velocity [m s$^{-1}$]"))
-    fig, axs = plt.subplots(len(rows), len(hours), figsize=(2.3 * len(hours) + 0.8, 2.5 * len(rows)), sharey=True, sharex="row", layout="constrained")
-    h = []
-    for j, hour in enumerate(hours):
-        for i, (v, name) in enumerate(rows):
-            ax = axs[i, j]
-            for rt, lab in zip(RTS, ("1D", "3D")):
-                g = d[(d.rt == rt) & (d.hour == hour)].pivot_table(index="height", columns="rep", values=v)
-                g = g[g.notna().sum(axis=1) >= min_members]
-                ax.fill_betweenx(g.index, g.min(axis=1), g.max(axis=1), alpha=0.25, lw=0, **st.RT[lab])
-                line, = ax.plot(g.mean(axis=1), g.index, lw=1.8, label=lab, **st.RT[lab])
-                if i == 0 and j == 0:
-                    h.append(line)
-            st.apply(ax)
-            st.panel(ax, i * len(hours) + j)
-            if j == 0:
-                ax.set_ylabel("height above the core base [m]")
-        axs[0, j].annotate(f"{hour}-{hour + 1} LT", xy=(0.5, 1.), xycoords="axes fraction", xytext=(0, 20), textcoords="offset points", ha="center", va="bottom", fontsize=11)
-    for i, (v, name) in enumerate(rows):
-        top = d[d.hour.isin(hours)].groupby(["rt", "hour", "height"])[v].mean().max()
-        for ax in axs[i]:
-            ax.set_xlabel(name)
-            ax.set_xlim(0., 1.05 * top)
-    axs[0, 0].set_ylim(bottom=0.)
-    fig.legend(handles=h, ncols=2, loc="outside lower center")
+    return pd.read_csv(f)
+
+
+def _members(d, rt, hour, v, n=3):
+    """Height by member table of v; layers where at least n members have a core."""
+    g = d[(d.rt == rt) & (d.hour == hour)].pivot_table(index="height", columns="rep", values=v)
+    return g[g.notna().sum(axis=1) >= n]
+
+
+def paired_ratio(d, hour, v, n=3):
+    """3D over 1D member by member (members share seeds); layers where at least n pairs exist."""
+    r = _members(d, RTS[1], hour, v, 0) / _members(d, RTS[0], hour, v, 0)
+    return r[r.notna().sum(axis=1) >= n]
+
+
+def _both(ax, d, hour, v, st):
+    for rt, lab in zip(RTS, ("1D", "3D")):
+        g = _members(d, rt, hour, v)
+        ax.fill_betweenx(g.index, g.min(axis=1), g.max(axis=1), alpha=0.25, lw=0, **st.RT[lab])
+        ax.plot(g.mean(axis=1), g.index, lw=1.8, label=lab, **st.RT[lab])
+
+
+def _frame(axs, hours, st):
+    for k, ax in enumerate(axs.ravel()):
+        st.apply(ax)
+        st.panel(ax, k)
+    for ax in axs[:, 0]:
+        ax.set_ylabel("height above cloud base [m]")
+    axs[0, 0].set_ylim(*YLIM)
+    for ax, hour in zip(axs[0], hours):
+        ax.annotate(f"{hour}-{hour + 1} LT", xy=(0.5, 1.), xycoords="axes fraction", xytext=(0, 20), textcoords="offset points", ha="center", va="bottom", fontsize=11)
+
+
+def figure_rates(expt, hours=(12, 13, 14, 15)):
+    """Bulk entrainment and detrainment rates of the core against height above its base, one column per hour;
+    member mean and min-max band where at least three members have a core."""
+    import style as st
+    from style import plt
+    d = layers(expt)
+    rows = (("eps_qt", "entrainment [km$^{-1}$]", (0., 0.65)), ("delta_qt", "detrainment [km$^{-1}$]", (0., 7.)))
+    fig, axs = plt.subplots(2, len(hours), figsize=(10., 5.4), sharey=True, sharex="row", layout="constrained")
+    for i, (v, name, xlim) in enumerate(rows):
+        for j, hour in enumerate(hours):
+            _both(axs[i, j], d, hour, v, st)
+            axs[i, j].set(xlabel=name, xlim=xlim)
+    _frame(axs, hours, st)
+    fig.legend(handles=axs[0, 0].lines[:2], ncols=2, loc="outside lower center")
     return st.savefig(fig, expt, "in_progress/fig_entrainment")
+
+
+def figure_massflux(expt, hours=(12, 13, 14, 15)):
+    """Core mass flux of both runs, and the 3D over 1D ratio of its two factors, core area and core speed (paired by
+    member; mean and min-max band over the pairs)."""
+    import style as st
+    from matplotlib.lines import Line2D
+    from style import plt
+    d = layers(expt)
+    fig, axs = plt.subplots(2, len(hours), figsize=(10., 5.6), sharey=True, sharex="row", layout="constrained")
+    for j, hour in enumerate(hours):
+        _both(axs[0, j], d, hour, "M", st)
+        axs[0, j].set(xlabel="core mass flux [kg m$^{-2}$ s$^{-1}$]", xlim=(0., 0.06))
+        ax = axs[1, j]
+        ax.axvline(1., color="0.75", lw=0.8, zorder=0)
+        for lab, (v, kw) in SPLIT.items():
+            r = paired_ratio(d, hour, v)
+            r = r[r.index >= LIFT]              # below, the two cores start at different heights and the ratio says only that
+            ax.fill_betweenx(r.index, r.min(axis=1), r.max(axis=1), alpha=0.25, lw=0, color=kw["color"])
+            ax.plot(r.mean(axis=1), r.index, lw=1.6, **kw)
+        ax.set(xlabel="3D / 1D [-]", xlim=(0.75, 3.05), xticks=[1., 1.5, 2., 2.5, 3.])
+    _frame(axs, hours, st)
+    h = axs[0, 0].lines[:2] + [Line2D([], [], lw=1.6, label=lab, **kw) for lab, (_, kw) in SPLIT.items()]
+    fig.legend(handles=h, ncols=4, loc="outside lower center")
+    return st.savefig(fig, expt, "in_progress/fig_core_massflux")
 
 
 if __name__ == "__main__":
@@ -166,8 +219,8 @@ if __name__ == "__main__":
     pd.set_option("display.width", 250); pd.set_option("display.max_rows", 200)
     d, e = summary(a.expt)
     show = lambda cols, keys=("1D", "3D", "d_over_se"): e.loc[:, [(c, k) for c in cols for k in keys]].to_string(float_format=lambda v: f"{v:.2f}")
-    print("--- bulk rates [1/km] by solar hour and height above the core base [m]; member mean, 3D minus 1D over its standard error")
+    print("--- bulk rates [1/km] by solar hour and height above cloud base [m]; member mean, 3D minus 1D over its standard error")
     print(show(["eps_qt", "eps_thl", "delta_qt", "dlnM"]))
     print("\n--- neglected terms [1/km], member mean: source and tendency in eps (qt, thl), area tendency in delta")
     print(show(["src_qt", "tend_qt", "src_thl", "tend_thl", "atend"], keys=("1D", "3D")))
-    print(figure(a.expt))
+    print(figure_rates(a.expt)); print(figure_massflux(a.expt))

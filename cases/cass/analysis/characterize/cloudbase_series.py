@@ -168,9 +168,11 @@ def figure4r(expt, xmin=-1., xmax=7., step=0.28):
         for rt, lab in zip(RTS, ("1D", "3D")):
             c = sum(H[(rt, rep)]["hist_core"].values[((H[(rt, rep)].lst >= h0) & (H[(rt, rep)].lst < h1)).values].sum(axis=0)
                     for rep in range(1, 5))
-            y = gaussian_kde(x[c > 0], weights=c[c > 0], bw_method=c.sum() ** -0.2)(xs)   # Scott's rule on the sample count
+            kde = gaussian_kde(x[c > 0], weights=c[c > 0], bw_method=c.sum() ** -0.2)      # Scott's rule on the sample count
+            y, mean = kde(xs), float((x * c).sum() / c.sum())
             ax.fill_between(xs, base, base + y, color="w", lw=0, zorder=front)     # hides the row behind
             line, = ax.plot(xs, base + y, lw=1.6, zorder=front + 1, label=lab, **st.RT[lab])
+            ax.plot([mean, mean], [base, base + float(kde(mean)[0])], lw=1., ls="--", zorder=front + 1, **st.RT[lab])      # the mean
             if k == 0:
                 h.append(line)
         ax.axhline(base, color="0.6", lw=0.6, zorder=front)
@@ -181,7 +183,10 @@ def figure4r(expt, xmin=-1., xmax=7., step=0.28):
     ax.set_ylim(0., (len(HOURS) - 1) * step + 0.5)
     st.apply(ax)
     ax.spines["left"].set_visible(False)
-    ax.legend(handles=h, ncols=2, loc="upper right")
+    from matplotlib.lines import Line2D
+    first = ax.legend(handles=h, ncols=2, loc="upper right")
+    ax.add_artist(first)
+    ax.legend(handles=[Line2D([], [], color="k", lw=1., ls="--", label="mean")], loc="upper right", bbox_to_anchor=(1., 0.94))
     return st.savefig(fig, expt, "fig_w_ridge")
 
 
